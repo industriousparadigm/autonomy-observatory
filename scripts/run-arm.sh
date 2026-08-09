@@ -40,4 +40,10 @@ su -s /bin/sh -c "cd /app && exec node --experimental-strip-types src/cli.ts run
 status=$?
 set -e
 echo "$(date -Iseconds) run-arm[$ARM]: exited status=$status"
+
+# Offsite backup, after the run and never allowed to affect its outcome.
+set +e
+su -s /bin/sh -c "/app/scripts/backup.sh '$ARM'" agent
+set -e
+
 exit "$status"

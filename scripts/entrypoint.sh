@@ -26,6 +26,39 @@ chown agent:agent /data /data/workspaces /data/logs /data/claude-config
 chmod 0755 /data /data/workspaces /data/logs
 chmod 0700 /data/claude-config
 
+# Per-repo deploy keys for the offsite backup. Written at boot rather than
+# baked into the image so rotating a key is a variable change and a restart.
+# Two keys, one host: only an ssh alias per repo can select between them.
+SSH_DIR=/home/agent/.ssh
+if [ -n "${DEPLOY_KEY_WORKSPACE_A_B64:-}" ] || [ -n "${DEPLOY_KEY_DATA_B64:-}" ]; then
+  mkdir -p "$SSH_DIR"
+  [ -n "${DEPLOY_KEY_WORKSPACE_A_B64:-}" ] &&
+    printf '%s' "$DEPLOY_KEY_WORKSPACE_A_B64" | base64 -d > "$SSH_DIR/workspace_a"
+  [ -n "${DEPLOY_KEY_DATA_B64:-}" ] &&
+    printf '%s' "$DEPLOY_KEY_DATA_B64" | base64 -d > "$SSH_DIR/data"
+  cat > "$SSH_DIR/config" <<'EOF'
+Host github-workspace-a
+  HostName github.com
+  User git
+  IdentityFile ~/.ssh/workspace_a
+  IdentitiesOnly yes
+  StrictHostKeyChecking accept-new
+Host github-data
+  HostName github.com
+  User git
+  IdentityFile ~/.ssh/data
+  IdentitiesOnly yes
+  StrictHostKeyChecking accept-new
+EOF
+  chmod 0700 "$SSH_DIR"
+  chmod 0600 "$SSH_DIR"/* 2>/dev/null || true
+  chown -R agent:agent "$SSH_DIR"
+fi
+
+# git refuses to operate on a repo owned by another user; the volume's repos
+# are the agent's, and only the agent ever touches them.
+su -s /bin/sh -c 'git config --global --add safe.directory "*"' agent 2>/dev/null || true
+
 # Cron overlap locks live on tmpfs, not the volume: a container restart
 # should always clear them, since a lock surviving a restart could only be
 # stale (see scripts/run-arm.sh for the additional in-process staleness check).
