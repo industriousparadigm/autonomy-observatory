@@ -1,0 +1,34 @@
+# Arm A — baseline. Full harness, one model family. This is the phenomenon.
+#
+# Phase 0 deliberately has no shell, no memory beyond the workspace, no news,
+# no mailbox and no budget ledger. Capability gets added when the current
+# version stops surprising us, never in anticipation.
+id: a
+label: baseline
+model: claude-opus-5
+
+# Billed tokens per session: uncached input + cache writes + output.
+budgetTokens: 40000
+
+# Dollar backstop handed to the SDK. Above the token budget on purpose — it
+# should only ever fire if token accounting has itself failed.
+maxBudgetUsd: 2.00
+
+timezone: Europe/Lisbon
+
+# SDK tool names available this phase.
+tools:
+  - Read
+  - Write
+  - Edit
+
+# How those same tools are named in the system prompt, in plain words.
+toolNames:
+  - read
+  - write
+  - edit
+
+hasMailbox: false
+wipeWorkspaceEachRun: false
+seedFiles: {}
+maxTurns: 60

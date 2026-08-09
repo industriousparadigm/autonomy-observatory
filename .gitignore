@@ -1,0 +1,13 @@
+node_modules/
+.env
+.env.*
+*.log
+
+# Never commit anything that could carry a credential or agent output.
+data/
+deploy-keys/
+
+# Observatory build artefacts
+observatory/.next/
+observatory/node_modules/
+observatory/out/
