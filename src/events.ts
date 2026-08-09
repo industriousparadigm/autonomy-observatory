@@ -128,12 +128,15 @@ export function sha256(text: string): string {
  * with it.
  */
 export class EventLog {
+  // Explicit fields rather than constructor parameter properties: Node's
+  // type-stripping runs the .ts directly and rejects that syntax.
   private seq: number;
+  private readonly path: string;
+  private readonly arm: string;
 
-  constructor(
-    private readonly path: string,
-    private readonly arm: string,
-  ) {
+  constructor(path: string, arm: string) {
+    this.path = path;
+    this.arm = arm;
     this.seq = existsSync(path) ? readLog(path).length : 0;
   }
 

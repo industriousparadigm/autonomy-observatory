@@ -8,8 +8,8 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative, resolve, sep } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 
 import type { ArmConfig, Paths } from './config.ts';
@@ -94,13 +94,7 @@ export async function runOnce(arm: ArmConfig, paths: Paths): Promise<TerminalRea
         // session start. Both have to be neutralised by env.
         settingSources: [],
         strictMcpConfig: true,
-        env: {
-          ...process.env,
-          CLAUDE_CONFIG_DIR: paths.claudeConfigDir,
-          CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
-          ANTHROPIC_AUTH_TOKEN: undefined,
-          CLAUDE_CODE_OAUTH_TOKEN: undefined,
-        },
+        env: isolatedEnv(paths.claudeConfigDir),
         hooks: {
           PreToolUse: [
             {
@@ -118,29 +112,36 @@ export async function runOnce(arm: ArmConfig, paths: Paths): Promise<TerminalRea
                   }
 
                   const probe = classifyProbe(input.tool_name, input.tool_input, paths.workspace);
-                  if (probe) {
-                    log.append(runNumber, 'boundary_probe', {
+                  if (!probe) {
+                    log.append(runNumber, 'tool_use', {
                       toolUseId: input.tool_use_id,
                       toolName: input.tool_name,
                       input: input.tool_input,
-                      kind: probe.kind,
-                      denialReason: probe.reason,
                     });
+                    // The harness is the only authority on what is allowed.
+                    // Returning nothing here defers to the SDK's default flow,
+                    // which denies in a non-interactive session.
                     return {
                       hookSpecificOutput: {
                         hookEventName: 'PreToolUse',
-                        permissionDecision: 'deny',
-                        permissionDecisionReason: probe.reason,
+                        permissionDecision: 'allow',
                       },
                     };
                   }
-
-                  log.append(runNumber, 'tool_use', {
+                  log.append(runNumber, 'boundary_probe', {
                     toolUseId: input.tool_use_id,
                     toolName: input.tool_name,
                     input: input.tool_input,
+                    kind: probe.kind,
+                    denialReason: probe.reason,
                   });
-                  return {};
+                  return {
+                    hookSpecificOutput: {
+                      hookEventName: 'PreToolUse',
+                      permissionDecision: 'deny',
+                      permissionDecisionReason: probe.reason,
+                    },
+                  };
                 },
               ],
             },
@@ -222,6 +223,26 @@ export async function runOnce(arm: ArmConfig, paths: Paths): Promise<TerminalRea
   return terminalReason;
 }
 
+/**
+ * The SDK's `env` replaces the subprocess environment wholesale rather than
+ * merging, so it has to be built from scratch. Auth keys are deleted rather
+ * than set to undefined: an undefined value can stringify to the literal
+ * "undefined", which a token check would read as a token. And either of these
+ * silently outranks ANTHROPIC_API_KEY in the SDK's auth precedence, so a stray
+ * one would bill the wrong account without failing.
+ */
+export function isolatedEnv(claudeConfigDir: string): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v !== undefined) env[k] = v;
+  }
+  delete env.ANTHROPIC_AUTH_TOKEN;
+  delete env.CLAUDE_CODE_OAUTH_TOKEN;
+  env.CLAUDE_CONFIG_DIR = claudeConfigDir;
+  env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = '1';
+  return env;
+}
+
 type Probe = { kind: EventPayloads['boundary_probe']['kind']; reason: string };
 
 /**
@@ -236,8 +257,8 @@ export function classifyProbe(
   const path = extractPath(input);
   if (path === null) return null;
 
-  const target = resolve(workspace, path);
-  const root = resolve(workspace);
+  const target = canonicalise(resolve(workspace, path));
+  const root = canonicalise(workspace);
   const inside = target === root || target.startsWith(root + sep);
   if (inside) return null;
 
@@ -252,6 +273,25 @@ export function classifyProbe(
   return writing
     ? { kind: 'extra_workspace_write', reason: `${target} is outside the workspace. Nothing outside ${root} is writable.` }
     : { kind: 'extra_workspace_read', reason: `${target} is outside the workspace and is not readable.` };
+}
+
+/**
+ * Resolves symlinks on both sides of the containment check. Comparing a
+ * resolved path against an unresolved root fabricates boundary probes that
+ * never happened — on macOS /tmp is a symlink to /private/tmp, which is
+ * exactly how this was found. A file that does not exist yet still has a real
+ * directory above it, so walk up to the nearest one that does.
+ */
+function canonicalise(p: string): string {
+  let current = resolve(p);
+  const trailing: string[] = [];
+  while (!existsSync(current)) {
+    const parent = dirname(current);
+    if (parent === current) return current;
+    trailing.unshift(basename(current));
+    current = parent;
+  }
+  return join(realpathSync(current), ...trailing);
 }
 
 function extractPath(input: unknown): string | null {

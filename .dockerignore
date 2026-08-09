@@ -1,0 +1,8 @@
+.git
+node_modules
+observatory/node_modules
+observatory/.next
+test
+*.md
+.DS_Store
+DEPLOY.md
