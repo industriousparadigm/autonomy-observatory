@@ -23,7 +23,10 @@ WORKDIR /app/observatory
 COPY observatory/package.json observatory/package-lock.json* ./
 RUN npm ci || npm install
 COPY observatory/ ./
-RUN npm run build
+# Next.js only emits public/ when there are static assets, and the runtime
+# stage copies it unconditionally. Guaranteeing it here rather than relying on
+# a directory existing in the host checkout: an empty one does not survive git.
+RUN mkdir -p /app/observatory/public && npm run build
 
 ################################################################################
 # Stage 3: runtime image.
