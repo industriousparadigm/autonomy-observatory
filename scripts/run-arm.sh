@@ -11,6 +11,15 @@
 # left behind by a run that wedged without the container restarting.
 set -eu
 
+# Restore the service environment. Running this by hand from a shell works
+# without it, which is exactly why its absence went unnoticed: only cron starts
+# the job with a stripped environment, so only the scheduled run failed.
+if [ -f /run/harness.env ]; then
+  set -a
+  . /run/harness.env
+  set +a
+fi
+
 ARM="${1:?usage: run-arm.sh <arm>}"
 LOCK="/run/locks/${ARM}.lock"
 STALE_SECONDS=10800 # 3h: no real run should take this long; older locks are wedged, not overlapping.

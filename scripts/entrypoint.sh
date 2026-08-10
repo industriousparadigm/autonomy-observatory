@@ -59,6 +59,20 @@ fi
 # are the agent's, and only the agent ever touches them.
 su -s /bin/sh -c 'git config --global --add safe.directory "*"' agent 2>/dev/null || true
 
+# cron does not pass its own environment to the jobs it starts: a job sees only
+# HOME, PATH, SHELL and whatever the crontab file itself declares. None of this
+# service's variables reach it, so the run finds no API key and the SDK fails
+# with "Not logged in". Snapshot what a run needs where run-arm.sh can source
+# it. Root-only, on tmpfs, rewritten every boot.
+umask 077
+: > /run/harness.env
+for v in ANTHROPIC_API_KEY DATA_ROOT CLAUDE_CONFIG_DIR CLAUDE_CODE_DISABLE_AUTO_MEMORY \
+         WORKSPACE_REPO DATA_REPO ARM TZ; do
+  eval "value=\${$v:-}"
+  [ -n "$value" ] && printf '%s=%s\n' "$v" "$value" >> /run/harness.env
+done
+chmod 600 /run/harness.env
+
 # Cron overlap locks live on tmpfs, not the volume: a container restart
 # should always clear them, since a lock surviving a restart could only be
 # stale (see scripts/run-arm.sh for the additional in-process staleness check).
