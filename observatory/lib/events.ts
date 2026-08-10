@@ -3,6 +3,14 @@
  * imported: this app builds and deploys as a standalone sibling package, and
  * the harness repo is owned by a different agent. Field names and shapes here
  * must track that file exactly — if it changes, this must change with it.
+ *
+ * One deliberate divergence: fields the harness added after the log already
+ * had entries in it (systemPrompt, toolNames, workspaceFiles[].content,
+ * assistant_message.thinking/toolUseIds) are marked optional here even though
+ * ../src/events.ts declares them required. The source of truth is what a run
+ * actually wrote, and runs from before the field existed are real rows in the
+ * same file — the type has to admit that or every reader of the log needs its
+ * own undefined-check discipline.
  */
 
 export type EventType =
@@ -35,13 +43,32 @@ export type BoundaryProbeKind =
 export type EventPayloads = {
   run_started: {
     wakeMessage: string;
+    /** Absent on runs recorded before this field existed. */
+    systemPrompt?: string;
     systemPromptSha256: string;
     model: string;
     budgetTokens: number;
     elapsedMs: number | null;
-    workspaceFiles: { path: string; bytes: number; sha256: string }[];
+    /** Absent on runs recorded before this field existed. */
+    toolNames?: string[];
+    workspaceFiles: {
+      path: string;
+      bytes: number;
+      sha256: string;
+      /** Absent on runs recorded before this field existed. */
+      content?: string;
+    }[];
   };
-  assistant_message: { text: string; usage: Usage; billed: number };
+  assistant_message: {
+    text: string;
+    /** Absent on runs recorded before this field existed. */
+    thinking?: string;
+    /** Absent on runs recorded before this field existed — see lib/transcript.ts
+     *  for how grouping falls back to log order when this is missing. */
+    toolUseIds?: string[];
+    usage: Usage;
+    billed: number;
+  };
   tool_use: { toolUseId: string; toolName: string; input: unknown };
   tool_result: { toolUseId: string; toolName: string; ok: boolean; result: unknown };
   boundary_probe: {

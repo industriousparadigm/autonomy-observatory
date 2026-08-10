@@ -3,6 +3,8 @@ import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { RunFlags, isFlagged } from '@/components/Pills';
 import { UsageMeter } from '@/components/UsageMeter';
+import { RunRow } from '@/components/RunRow';
+import { LinkPendingDot } from '@/components/LinkPendingDot';
 import { loadRunSummaries } from '@/lib/runs';
 import { eventLogPath } from '@/lib/log';
 import { formatElapsedGap, formatWallClock, truncate } from '@/lib/format';
@@ -111,10 +113,11 @@ export default async function TimelinePage({ searchParams }: { searchParams: Pro
                 </thead>
                 <tbody>
                   {filtered.map((run) => (
-                    <tr key={`${run.arm}-${run.run}`} className={isFlagged(run) ? 'flag' : undefined}>
+                    <RunRow key={`${run.arm}-${run.run}`} href={`/runs/${run.run}`} className={isFlagged(run) ? 'flag' : undefined}>
                       <td>
                         <Link href={`/runs/${run.run}`} className="run-link">
                           #{run.run}
+                          <LinkPendingDot />
                         </Link>
                       </td>
                       <td className="num">{run.startedAt ? formatWallClock(run.startedAt) : '—'}</td>
@@ -127,7 +130,7 @@ export default async function TimelinePage({ searchParams }: { searchParams: Pro
                       <td>
                         <RunFlags run={run} />
                       </td>
-                    </tr>
+                    </RunRow>
                   ))}
                 </tbody>
               </table>

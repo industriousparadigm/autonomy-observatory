@@ -4,6 +4,7 @@ const TABS = [
   { href: '/', key: 'timeline', label: 'Runs' },
   { href: '/budget', key: 'budget', label: 'Budget' },
   { href: '/probes', key: 'probes', label: 'Boundary probes' },
+  { href: '/setup', key: 'setup', label: 'Setup & docs' },
 ] as const;
 
 export function Header({ active, meta }: { active: (typeof TABS)[number]['key'] | 'run-detail'; meta?: string }) {

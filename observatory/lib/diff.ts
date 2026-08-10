@@ -88,6 +88,23 @@ export function parseUnifiedDiff(diff: string): DiffFile[] {
   return files;
 }
 
+/**
+ * The Edit/Write tool result's `structuredPatch` is hunks only — no file
+ * headers, no `diff --git` line — because it was never meant to be a
+ * standalone diff, just a description of one substitution. Synthesizing a
+ * minimal unified diff around it lets a single edit reuse the exact same
+ * <DiffView> the commit event already renders, instead of a second
+ * diff-rendering path.
+ */
+export function structuredPatchToUnifiedDiff(
+  filePath: string,
+  patch: { oldStart: number; oldLines: number; newStart: number; newLines: number; lines: string[] }[],
+): string {
+  const header = `diff --git a/${filePath} b/${filePath}\n--- a/${filePath}\n+++ b/${filePath}\n`;
+  const hunks = patch.map((h) => `@@ -${h.oldStart},${h.oldLines} +${h.newStart},${h.newLines} @@\n${h.lines.join('\n')}\n`).join('');
+  return header + hunks;
+}
+
 /** File paths touched by a diff, for a one-line "what changed" summary. */
 export function changedFilePaths(diff: string): string[] {
   const paths: string[] = [];

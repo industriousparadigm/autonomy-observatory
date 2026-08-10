@@ -2,116 +2,17 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { UsageMeter } from '@/components/UsageMeter';
-import { Expandable } from '@/components/Expandable';
-import { DiffView } from '@/components/DiffView';
+import { TerminalPill } from '@/components/TerminalPill';
+import { FileModalProvider } from '@/components/FileModal';
+import { renderNode } from '@/components/renderers/registry';
 import { loadRunEvents } from '@/lib/runs';
+import { buildTranscript } from '@/lib/transcript';
 import { CategoryAccumulator } from '@/lib/budget';
-import { CATEGORY_ORDER, CATEGORY_LABEL, categoryForTool } from '@/lib/categories';
+import { CATEGORY_ORDER, CATEGORY_LABEL } from '@/lib/categories';
 import type { RunEvent } from '@/lib/events';
-import { formatWallClock, formatElapsedGap, formatDuration, formatUsd, formatCompact, prettyValue } from '@/lib/format';
+import { formatWallClock, formatElapsedGap, formatDuration, formatUsd, formatCompact } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
-
-function TerminalPill({ reason, inProgress, crashed }: { reason: string | null; inProgress: boolean; crashed: boolean }) {
-  if (inProgress && !crashed) return <span className="pill pill--progress">In progress</span>;
-  if (crashed) return <span className="pill pill--error">Harness error</span>;
-  if (reason === 'voluntary_stop') return <span className="pill pill--stop">Voluntary stop</span>;
-  if (reason === 'budget_exhausted') return <span className="pill pill--exhausted">Budget exhausted</span>;
-  if (reason === 'harness_error') return <span className="pill pill--error">Harness error</span>;
-  return <span className="pill pill--done">{reason?.replace('_', ' ') ?? 'ended'}</span>;
-}
-
-function TranscriptTurn({ event }: { event: RunEvent }) {
-  switch (event.type) {
-    case 'assistant_message':
-      return (
-        <div className="turn turn--assistant">
-          <div className="kind">
-            Assistant · {formatCompact(event.payload.billed)} tokens billed
-          </div>
-          <div className="body-text">{event.payload.text || <em>(no text — tool calls only)</em>}</div>
-        </div>
-      );
-    case 'tool_use':
-      return (
-        <div className="turn turn--tool_use">
-          <div className="kind" style={{ color: `var(--cat-${categoryForTool(event.payload.toolName)})` }}>
-            Tool call · {event.payload.toolName}
-          </div>
-          <Expandable text={prettyValue(event.payload.input)} />
-        </div>
-      );
-    case 'tool_result':
-      return (
-        <div className="turn">
-          <div className="kind">
-            Tool result · {event.payload.toolName} ·{' '}
-            <span className={event.payload.ok ? 'result-ok' : 'result-fail'}>{event.payload.ok ? 'ok' : 'failed'}</span>
-          </div>
-          <Expandable text={prettyValue(event.payload.result)} />
-        </div>
-      );
-    case 'boundary_probe':
-      return (
-        <div className="turn turn--boundary_probe">
-          <div className="kind">
-            <span className="pill pill--probe">Boundary probe</span> {event.payload.kind.replace(/_/g, ' ')} · {event.payload.toolName}
-          </div>
-          <p style={{ margin: '0.3rem 0' }}>
-            <strong>Denied:</strong> {event.payload.denialReason}
-          </p>
-          <Expandable text={prettyValue(event.payload.input)} />
-        </div>
-      );
-    case 'budget_exhausted':
-      return (
-        <div className="turn turn--budget_exhausted">
-          <div className="kind">
-            <span className="pill pill--exhausted">Budget exhausted</span>
-          </div>
-          <p style={{ margin: '0.3rem 0' }}>
-            {formatCompact(event.payload.billedTokens)} billed against a {formatCompact(event.payload.budgetTokens)} token budget.
-          </p>
-        </div>
-      );
-    case 'commit':
-      return (
-        <div className="turn turn--commit">
-          <div className="kind">
-            Commit {event.payload.sha.slice(0, 8)} · {event.payload.filesChanged} file{event.payload.filesChanged === 1 ? '' : 's'} · +
-            {event.payload.insertions}/-{event.payload.deletions}
-          </div>
-          <div style={{ padding: '0 1.05rem 0.9rem' }}>
-            <DiffView diff={event.payload.diff} />
-          </div>
-        </div>
-      );
-    case 'harness_error':
-      return (
-        <div className="turn turn--harness_error">
-          <div className="kind">
-            <span className="pill pill--error">Harness error</span>
-          </div>
-          <p style={{ margin: '0.3rem 0' }}>{event.payload.message}</p>
-          {event.payload.stack ? <Expandable text={event.payload.stack} /> : null}
-        </div>
-      );
-    case 'run_ended':
-      return (
-        <div className="turn turn--run_ended">
-          <div className="kind">
-            Run ended · <TerminalPill reason={event.payload.terminalReason} inProgress={false} crashed={false} />
-          </div>
-          <p style={{ margin: '0.3rem 0' }}>
-            {formatCompact(event.payload.billed)} tokens billed over {event.payload.turns} turns, {formatDuration(event.payload.durationMs)},
-            est. {formatUsd(event.payload.estimatedCostUsd)}.
-          </p>
-        </div>
-      );
-    default:
-      return null;
-  }
-}
 
 export default async function RunDetailPage({ params }: { params: Promise<{ run: string }> }) {
   const { run: runParam } = await params;
@@ -125,7 +26,6 @@ export default async function RunDetailPage({ params }: { params: Promise<{ run:
   const ended = events.find((e) => e.type === 'run_ended');
   const crashed = !ended && events.some((e) => e.type === 'harness_error');
   const inProgress = !ended;
-  const transcript = events.filter((e) => e.type !== 'run_started');
 
   const billedSoFar = ended
     ? (ended.payload as RunEvent<'run_ended'>['payload']).billed
@@ -136,6 +36,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ run:
   acc.finish();
 
   const wake = started?.payload as RunEvent<'run_started'>['payload'] | undefined;
+  const transcript = buildTranscript(events);
 
   return (
     <>
@@ -149,7 +50,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ run:
         </h1>
         <p className="page-sub">
           {wake ? formatWallClock(started!.ts) : ''} {wake?.elapsedMs != null ? `· ${formatElapsedGap(wake.elapsedMs)} since previous run` : ''}{' '}
-          {wake?.model ? `· ${wake.model}` : ''}
+          {wake?.model ? `· ${wake.model}` : ''} · <Link href={`/setup?run=${run}`}>view full wake context</Link>
         </p>
 
         {inProgress ? (
@@ -198,11 +99,9 @@ export default async function RunDetailPage({ params }: { params: Promise<{ run:
         <pre className="wake-message">{wake?.wakeMessage ?? '(no run_started event recorded for this run)'}</pre>
 
         <h2>Transcript</h2>
-        <div className="transcript">
-          {transcript.map((event, i) => (
-            <TranscriptTurn key={`${event.seq}-${i}`} event={event} />
-          ))}
-        </div>
+        <FileModalProvider>
+          <div className="transcript">{transcript.map((node) => renderNode(node, node.seq))}</div>
+        </FileModalProvider>
       </div>
     </>
   );
