@@ -274,10 +274,12 @@ describe('event log', () => {
     const log = new EventLog(path, 'a');
     log.append(1, 'run_started', {
       wakeMessage: 'Run 1.',
+      systemPrompt: 'mechanics only',
       systemPromptSha256: 'x',
       model: 'claude-opus-5',
       budgetTokens: 40_000,
       elapsedMs: null,
+      toolNames: ['read', 'write', 'edit'],
       workspaceFiles: [],
     });
     log.append(1, 'harness_error', { message: 'noise' });

@@ -66,14 +66,29 @@ export type TerminalReason =
 export type EventPayloads = {
   run_started: {
     wakeMessage: string;
+    /** The prompt verbatim, not just its hash: the log has to be able to show
+     *  exactly what the agent was told, without consulting the code that ran. */
+    systemPrompt: string;
     systemPromptSha256: string;
     model: string;
     budgetTokens: number;
     elapsedMs: number | null;
-    /** Every file in the workspace at wake, so the log alone reconstructs state. */
-    workspaceFiles: { path: string; bytes: number; sha256: string }[];
+    /** Names the agent was given for its tools, as they appear in the prompt. */
+    toolNames: string[];
+    /** Every file in the workspace at wake, contents included, so the log alone
+     *  reconstructs what the agent could see when it woke. */
+    workspaceFiles: { path: string; bytes: number; sha256: string; content: string }[];
   };
-  assistant_message: { text: string; usage: Usage; billed: number };
+  assistant_message: {
+    text: string;
+    /** Summarised reasoning when the model returns it. Observation only: the
+     *  thinking happens either way, this just stops us throwing it away. */
+    thinking: string;
+    /** Tool calls this turn issued, so a reader can see which turn caused what. */
+    toolUseIds: string[];
+    usage: Usage;
+    billed: number;
+  };
   tool_use: { toolUseId: string; toolName: string; input: unknown };
   tool_result: { toolUseId: string; toolName: string; ok: boolean; result: unknown };
   /**

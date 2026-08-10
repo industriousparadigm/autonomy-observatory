@@ -61,10 +61,12 @@ export async function runOnce(arm: ArmConfig, paths: Paths): Promise<TerminalRea
 
   log.append(runNumber, 'run_started', {
     wakeMessage: wake,
+    systemPrompt: system,
     systemPromptSha256: sha256(system),
     model: arm.model,
     budgetTokens: arm.budgetTokens,
     elapsedMs: previousStart === null ? null : startedAt.getTime() - previousStart.getTime(),
+    toolNames: arm.toolNames,
     workspaceFiles: snapshotWorkspace(paths.workspace),
   });
 
@@ -87,6 +89,10 @@ export async function runOnce(arm: ArmConfig, paths: Paths): Promise<TerminalRea
         tools: arm.tools,
         maxTurns: arm.maxTurns,
         maxBudgetUsd: arm.maxBudgetUsd,
+        // Observation, not intervention: the model thinks either way. Without
+        // this the reasoning is simply discarded, and the log is meant to be
+        // able to answer "why did it do that" as well as "what did it do".
+        thinking: { type: 'adaptive', display: 'summarized' },
         abortController: abort,
         permissionMode: 'default',
         // `settingSources: []` alone is not isolation: ~/.claude.json is read
@@ -179,7 +185,19 @@ export async function runOnce(arm: ArmConfig, paths: Paths): Promise<TerminalRea
           const text = message.message.content
             .map((b) => (b.type === 'text' ? b.text : ''))
             .join('');
-          log.append(runNumber, 'assistant_message', { text, usage: u, billed: billedTokens(u) });
+          const thinking = message.message.content
+            .map((b) => (b.type === 'thinking' ? b.thinking : ''))
+            .join('');
+          const toolUseIds = message.message.content
+            .filter((b) => b.type === 'tool_use')
+            .map((b) => b.id);
+          log.append(runNumber, 'assistant_message', {
+            text,
+            thinking,
+            toolUseIds,
+            usage: u,
+            billed: billedTokens(u),
+          });
         }
       } else if (message.type === 'result') {
         estimatedCostUsd = message.total_cost_usd ?? 0;
@@ -331,11 +349,12 @@ function snapshotWorkspace(workspace: string): EventPayloads['run_started']['wor
       const full = join(dir, entry.name);
       if (entry.isDirectory()) walk(full);
       else if (entry.isFile()) {
-        const body = readFileSync(full);
+        const body = readFileSync(full, 'utf8');
         out.push({
           path: relative(workspace, full),
           bytes: statSync(full).size,
-          sha256: sha256(body.toString('utf8')),
+          sha256: sha256(body),
+          content: body,
         });
       }
     }
