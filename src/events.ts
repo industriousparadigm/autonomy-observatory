@@ -5,9 +5,12 @@
  * recomputing them must never require re-running the agent.
  *
  * Format is JSONL — one event per line, never rewritten, never reordered.
+ * One deliberate exception: `readLog` truncates a corrupt trailing line left
+ * by a torn write, since leaving it in place would corrupt every event
+ * appended after it too.
  */
 
-import { appendFileSync, closeSync, existsSync, openSync, readFileSync, writeSync, fsyncSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readFileSync, truncateSync, writeSync, fsyncSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 
 export type EventType =
@@ -75,9 +78,12 @@ export type EventPayloads = {
     elapsedMs: number | null;
     /** Names the agent was given for its tools, as they appear in the prompt. */
     toolNames: string[];
-    /** Every file in the workspace at wake, contents included, so the log alone
-     *  reconstructs what the agent could see when it woke. */
-    workspaceFiles: { path: string; bytes: number; sha256: string; content: string }[];
+    /** Every file in the workspace at wake. Content is not inlined here — the
+     *  workspace only grows and is never wiped, so re-embedding it every run
+     *  is quadratic in run count. Content lives once per sha256 in the blob
+     *  store instead (see harness.ts's writeBlob); the observatory reads it
+     *  from there, keyed by the hash below. */
+    workspaceFiles: { path: string; bytes: number; sha256: string }[];
   };
   assistant_message: {
     text: string;
@@ -175,18 +181,45 @@ export class EventLog {
   }
 }
 
-export function readLog(path: string): RunEvent[] {
+/** A corrupt trailing line that was truncated away by {@link readLog}. */
+export type TruncatedTrailingLine = { line: number; raw: string };
+
+/**
+ * A line with no trailing newline is exactly what a torn write (container
+ * killed mid-write, disk full) produces, since a complete write always ends
+ * with the '\n' `EventLog.append` appends in the same call as the JSON. A
+ * corrupt line anywhere else in the file — including a corrupt-but-terminated
+ * last line — is not that shape, and means something worse happened than a
+ * torn write, so it still throws.
+ *
+ * When a trailing corrupt line is found it is truncated from the file (the
+ * only way to keep the log appendable — appending after it would concatenate
+ * onto the partial line, corrupting the next event too) and reported via
+ * `onRecoveredTruncation` rather than thrown, so run 1 after a torn write can
+ * still open the log to record why. Without this, one torn write bricks the
+ * log forever: this function runs before a run can even open it to record
+ * the loss.
+ */
+export function readLog(path: string, onRecoveredTruncation?: (t: TruncatedTrailingLine) => void): RunEvent[] {
   if (!existsSync(path)) return [];
-  return readFileSync(path, 'utf8')
-    .split('\n')
-    .filter((line) => line.trim() !== '')
-    .map((line, i) => {
-      try {
-        return JSON.parse(line) as RunEvent;
-      } catch (err) {
+  const raw = readFileSync(path, 'utf8');
+  const endsWithNewline = raw === '' || raw.endsWith('\n');
+  const lines = raw.split('\n').filter((line) => line.trim() !== '');
+
+  const events: RunEvent[] = [];
+  for (const [i, line] of lines.entries()) {
+    try {
+      events.push(JSON.parse(line) as RunEvent);
+    } catch (err) {
+      const isRecoverableTail = i === lines.length - 1 && !endsWithNewline;
+      if (!isRecoverableTail) {
         throw new Error(`corrupt event log at ${path} line ${i + 1}: ${(err as Error).message}`);
       }
-    });
+      truncateSync(path, Buffer.byteLength(raw, 'utf8') - Buffer.byteLength(line, 'utf8'));
+      onRecoveredTruncation?.({ line: i + 1, raw: line });
+    }
+  }
+  return events;
 }
 
 /** The run number the next wake should carry. */

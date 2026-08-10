@@ -4,7 +4,18 @@
  * runs and the result looks fine. That is why they are the phase 0 gate.
  */
 
-import { mkdtempSync, rmSync, symlinkSync, mkdirSync, writeFileSync, realpathSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  mkdirSync,
+  utimesSync,
+  writeFileSync,
+  realpathSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -16,7 +27,16 @@ import {
   wakeMessage,
   type WakeFacts,
 } from '../src/prompts.ts';
-import { classifyProbe, isolatedEnv } from '../src/harness.ts';
+import { ArmConfigSchema } from '../src/config.ts';
+import {
+  classifyProbe,
+  clearStaleIndexLock,
+  commitRunSafely,
+  isolatedEnv,
+  resolveTerminalReason,
+  snapshotWorkspace,
+  writeBlob,
+} from '../src/harness.ts';
 import { billedTokens, EventLog, nextRunNumber, readLog, type Usage } from '../src/events.ts';
 
 const baseFacts: WakeFacts = {
@@ -234,6 +254,43 @@ describe('budget accounting', () => {
   });
 });
 
+describe('terminal reason resolution', () => {
+  const usage = (billed: number): Usage => ({
+    inputTokens: billed,
+    outputTokens: 0,
+    cacheCreationInputTokens: 0,
+    cacheReadInputTokens: 0,
+  });
+  const base = { budgetTokens: 40_000, turns: 5, maxTurns: 60 };
+
+  it('reports budget_exhausted without a second event when the PreToolUse hook already caught it', () => {
+    expect(
+      resolveTerminalReason({ ...base, budgetHit: true, usage: usage(50_000) }),
+    ).toEqual({ terminalReason: 'budget_exhausted', budgetExhaustedNow: false });
+  });
+
+  // Regression: the hook only fires on the *next* tool call. A budget crossed
+  // on the turn that ends the session has no next tool call, so nothing ever
+  // sets budgetHit — this re-checks usage directly against budget.
+  it('catches budget exhaustion at end of stream when no trailing tool call gave the hook a chance', () => {
+    expect(
+      resolveTerminalReason({ ...base, budgetHit: false, usage: usage(40_000) }),
+    ).toEqual({ terminalReason: 'budget_exhausted', budgetExhaustedNow: true });
+  });
+
+  it('still reports a genuine voluntary stop well under budget', () => {
+    expect(
+      resolveTerminalReason({ ...base, budgetHit: false, usage: usage(1_000) }),
+    ).toEqual({ terminalReason: 'voluntary_stop', budgetExhaustedNow: false });
+  });
+
+  it('reports max_turns when turns run out under budget', () => {
+    expect(
+      resolveTerminalReason({ ...base, budgetHit: false, usage: usage(1_000), turns: 60 }),
+    ).toEqual({ terminalReason: 'max_turns', budgetExhaustedNow: false });
+  });
+});
+
 describe('event log', () => {
   let dir: string;
   let path: string;
@@ -263,6 +320,54 @@ describe('event log', () => {
     new EventLog(path, 'a').append(1, 'harness_error', { message: 'ok' });
     writeFileSync(path, readLog(path).map((e) => JSON.stringify(e)).join('\n') + '\n{ broken\n');
     expect(() => readLog(path)).toThrow(/line 2/);
+  });
+
+  it('still throws on corruption in the middle of the file, even though valid lines follow it', () => {
+    writeFileSync(path, '{"seq":0}\n{ broken\n{"seq":2}\n');
+    expect(() => readLog(path)).toThrow(/line 2/);
+  });
+
+  // Regression: a container killed mid-write (or a full disk) leaves a
+  // trailing line with no terminating newline, since that newline is the
+  // last character of the string EventLog.append writes. Left in place, the
+  // next append would concatenate onto it and corrupt that event too — and
+  // since readLog throws on any corrupt line, the log could never be opened
+  // again to record why.
+  it('recovers a corrupt trailing line left by a torn write, truncating it from the file', () => {
+    new EventLog(path, 'a').append(1, 'harness_error', { message: 'ok' });
+    const clean = readFileSync(path, 'utf8');
+    writeFileSync(path, `${clean}{"seq":1,"ts":"x","arm":"a","run":1,"type":"harness_error","payl`);
+
+    let recovered: { line: number; raw: string } | null = null;
+    const events = readLog(path, (t) => {
+      recovered = t;
+    });
+
+    expect(events).toHaveLength(1);
+    expect(recovered).not.toBeNull();
+    expect(recovered!.line).toBe(2);
+    expect(readFileSync(path, 'utf8')).toBe(clean);
+  });
+
+  it('does not treat a corrupt-but-terminated trailing line as a torn write', () => {
+    new EventLog(path, 'a').append(1, 'harness_error', { message: 'ok' });
+    const clean = readFileSync(path, 'utf8');
+    writeFileSync(path, `${clean}{ broken\n`);
+
+    let recovered: unknown = null;
+    expect(() => readLog(path, (t) => (recovered = t))).toThrow(/line 2/);
+    expect(recovered).toBeNull();
+  });
+
+  it('stays appendable after recovering a torn write', () => {
+    new EventLog(path, 'a').append(1, 'harness_error', { message: 'ok' });
+    writeFileSync(path, `${readFileSync(path, 'utf8')}{"seq":1,"broken`);
+    readLog(path);
+
+    new EventLog(path, 'a').append(2, 'harness_error', { message: 'after recovery' });
+    const events = readLog(path);
+    expect(events.map((e) => e.seq)).toEqual([0, 1]);
+    expect(events[1]?.payload).toEqual({ message: 'after recovery' });
   });
 
   it('treats an absent log as an empty one, so run 1 can happen', () => {
@@ -308,5 +413,111 @@ describe('environment isolation', () => {
     const env = isolatedEnv('/data/claude-config');
     expect(env.CLAUDE_CONFIG_DIR).toBe('/data/claude-config');
     expect(env.CLAUDE_CODE_DISABLE_AUTO_MEMORY).toBe('1');
+  });
+});
+
+describe('commit resilience', () => {
+  let workspace: string;
+
+  beforeEach(() => {
+    workspace = mkdtempSync(join(tmpdir(), 'obs-repo-'));
+  });
+  afterEach(() => rmSync(workspace, { recursive: true, force: true }));
+
+  // Regression: .git/index.lock lives on the persistent volume, so a
+  // container killed mid-commit leaves it behind and every subsequent run's
+  // commit fails identically until something clears it.
+  it('clears a stale index.lock left by a killed process', () => {
+    mkdirSync(join(workspace, '.git'));
+    const lock = join(workspace, '.git', 'index.lock');
+    writeFileSync(lock, '');
+    const old = new Date(Date.now() - 120_000);
+    utimesSync(lock, old, old);
+
+    clearStaleIndexLock(workspace);
+
+    expect(existsSync(lock)).toBe(false);
+  });
+
+  it('leaves a fresh index.lock alone — it could be a commit genuinely in flight', () => {
+    mkdirSync(join(workspace, '.git'));
+    const lock = join(workspace, '.git', 'index.lock');
+    writeFileSync(lock, '');
+
+    clearStaleIndexLock(workspace);
+
+    expect(existsSync(lock)).toBe(true);
+  });
+
+  const arm = ArmConfigSchema.parse({
+    id: 'a',
+    label: 'A',
+    model: 'claude-opus-5',
+    budgetTokens: 40_000,
+    maxBudgetUsd: 5,
+    timezone: 'UTC',
+    tools: [],
+    toolNames: [],
+  });
+
+  // Regression: commitRun was called unwrapped on both the success and error
+  // paths. A throw there (disk full, a lock it couldn't clear) meant the
+  // run's commit and run_ended events were never written — a run that spent
+  // real money shows as "in progress" forever.
+  it('records a commit failure as harness_error and reports it, instead of throwing', () => {
+    const logPath = join(workspace, 'log.jsonl');
+    const log = new EventLog(logPath, 'a');
+    const missingWorkspace = join(workspace, 'does-not-exist'); // git's cwd can't resolve, so `git add -A` fails
+
+    let committed = true;
+    expect(() => {
+      committed = commitRunSafely(missingWorkspace, 1, log, arm);
+    }).not.toThrow();
+
+    expect(committed).toBe(false);
+    const events = readLog(logPath);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe('harness_error');
+  });
+});
+
+describe('workspace snapshot blob store', () => {
+  let workspace: string;
+  let blobsDir: string;
+
+  beforeEach(() => {
+    workspace = mkdtempSync(join(tmpdir(), 'obs-ws2-'));
+    blobsDir = mkdtempSync(join(tmpdir(), 'obs-blobs-'));
+  });
+  afterEach(() => {
+    rmSync(workspace, { recursive: true, force: true });
+    rmSync(blobsDir, { recursive: true, force: true });
+  });
+
+  it('writes content once per sha256', () => {
+    const first = writeBlob(blobsDir, 'hello');
+    const second = writeBlob(blobsDir, 'hello');
+    expect(second).toBe(first);
+    expect(readFileSync(join(blobsDir, first), 'utf8')).toBe('hello');
+  });
+
+  // Regression: workspaceFiles[] used to inline every file's full content into
+  // every run_started event. The workspace only grows and is never wiped, so
+  // that made the log quadratic in run count.
+  it('snapshots workspace files without inlining content', () => {
+    writeFileSync(join(workspace, 'NOTES.md'), '# hi');
+    const files = snapshotWorkspace(workspace, blobsDir);
+
+    expect(files).toHaveLength(1);
+    expect(files[0]).not.toHaveProperty('content');
+    expect(readFileSync(join(blobsDir, files[0]!.sha256), 'utf8')).toBe('# hi');
+  });
+
+  it('does not grow the blob store when the same content reappears across snapshots', () => {
+    writeFileSync(join(workspace, 'NOTES.md'), 'unchanged across runs');
+    snapshotWorkspace(workspace, blobsDir);
+    snapshotWorkspace(workspace, blobsDir);
+
+    expect(readdirSync(blobsDir)).toHaveLength(1);
   });
 });

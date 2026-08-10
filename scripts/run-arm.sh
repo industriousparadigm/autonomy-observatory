@@ -53,6 +53,19 @@ echo "$(date -Iseconds) run-arm[$ARM]: exited status=$status"
 # Offsite backup, after the run and never allowed to affect its outcome.
 set +e
 su -s /bin/sh -c "/app/scripts/backup.sh '$ARM'" agent
+backup_status=$?
 set -e
+
+# Heartbeat covers the whole fire (run + backup), not just the run: a backup
+# that silently stops advancing is exactly the failure this can't afford to
+# stay invisible to (see scripts/backup.sh). Inert unless HEALTHCHECK_URL is
+# set — see DEPLOY.md. Never allowed to affect $status, same as backup above.
+if [ -n "${HEALTHCHECK_URL:-}" ]; then
+  if [ "$status" -eq 0 ] && [ "$backup_status" -eq 0 ]; then
+    curl -fsS -m 10 --retry 2 -o /dev/null "$HEALTHCHECK_URL" || true
+  else
+    curl -fsS -m 10 --retry 2 -o /dev/null "${HEALTHCHECK_URL}/fail" || true
+  fi
+fi
 
 exit "$status"

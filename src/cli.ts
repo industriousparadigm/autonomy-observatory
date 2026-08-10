@@ -26,6 +26,7 @@ async function main(): Promise<void> {
     case 'run': {
       mkdirSync(dirname(paths.eventLog), { recursive: true });
       mkdirSync(paths.claudeConfigDir, { recursive: true });
+      mkdirSync(paths.blobsDir, { recursive: true });
       const reason = await runOnce(arm, paths);
       process.stdout.write(`arm=${arm.id} terminal_reason=${reason}\n`);
       return;

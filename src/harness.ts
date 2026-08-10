@@ -8,7 +8,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 
@@ -24,6 +24,7 @@ import {
   ZERO_USAGE,
   type EventPayloads,
   type TerminalReason,
+  type TruncatedTrailingLine,
   type Usage,
 } from './events.ts';
 import { assertNoForbiddenContent, systemPrompt, wakeMessage } from './prompts.ts';
@@ -34,12 +35,23 @@ export async function runOnce(arm: ArmConfig, paths: Paths): Promise<TerminalRea
   mkdirSync(paths.workspace, { recursive: true });
   ensureGitRepo(paths.workspace);
 
-  const events = readLog(paths.eventLog);
+  // Boxed rather than a bare `let`: TS's flow analysis doesn't see through
+  // the callback closure, so a bare variable would still type-narrow to null
+  // below even after the callback runs.
+  const recovery: { truncated: TruncatedTrailingLine | null } = { truncated: null };
+  const events = readLog(paths.eventLog, (t) => {
+    recovery.truncated = t;
+  });
   const runNumber = nextRunNumber(events);
   const previousStart = lastRunStartedAt(events);
   const startedAt = new Date();
 
   const log = new EventLog(paths.eventLog, arm.id);
+  if (recovery.truncated) {
+    log.append(runNumber, 'harness_error', {
+      message: `recovered from a corrupt trailing log line at line ${recovery.truncated.line} (likely a torn write): ${recovery.truncated.raw.slice(0, 500)}`,
+    });
+  }
 
   const system = systemPrompt({
     workspacePath: paths.workspace,
@@ -67,7 +79,7 @@ export async function runOnce(arm: ArmConfig, paths: Paths): Promise<TerminalRea
     budgetTokens: arm.budgetTokens,
     elapsedMs: previousStart === null ? null : startedAt.getTime() - previousStart.getTime(),
     toolNames: arm.toolNames,
-    workspaceFiles: snapshotWorkspace(paths.workspace),
+    workspaceFiles: snapshotWorkspace(paths.workspace, paths.blobsDir),
   });
 
   let usage: Usage = ZERO_USAGE;
@@ -89,9 +101,12 @@ export async function runOnce(arm: ArmConfig, paths: Paths): Promise<TerminalRea
         tools: arm.tools,
         maxTurns: arm.maxTurns,
         maxBudgetUsd: arm.maxBudgetUsd,
-        // Observation, not intervention: the model thinks either way. Without
-        // this the reasoning is simply discarded, and the log is meant to be
-        // able to answer "why did it do that" as well as "what did it do".
+        // `display` is load-bearing, not decoration: the SDK only passes the
+        // display flag when it is set explicitly, and without it every
+        // thinking field comes back empty. Verified by A/B on an identical
+        // prompt — same token spend either way, so this changes what we can
+        // see, never what the model does. An empty field on a given turn just
+        // means that turn was trivial enough not to reason about.
         thinking: { type: 'adaptive', display: 'summarized' },
         abortController: abort,
         permissionMode: 'default',
@@ -208,7 +223,7 @@ export async function runOnce(arm: ArmConfig, paths: Paths): Promise<TerminalRea
       message: (err as Error).message,
       stack: (err as Error).stack,
     });
-    commitRun(paths.workspace, runNumber, log, arm);
+    commitRunSafely(paths.workspace, runNumber, log, arm);
     log.append(runNumber, 'run_ended', {
       terminalReason: 'harness_error',
       usage,
@@ -220,14 +235,16 @@ export async function runOnce(arm: ArmConfig, paths: Paths): Promise<TerminalRea
     return 'harness_error';
   }
 
-  commitRun(paths.workspace, runNumber, log, arm);
+  const outcome = resolveTerminalReason({ budgetHit, usage, budgetTokens: arm.budgetTokens, turns, maxTurns: arm.maxTurns });
+  if (outcome.budgetExhaustedNow) {
+    log.append(runNumber, 'budget_exhausted', {
+      billedTokens: billedTokens(usage),
+      budgetTokens: arm.budgetTokens,
+    });
+  }
 
-  // Stopping with budget left is a choice, and choices are the data.
-  const terminalReason: TerminalReason = budgetHit
-    ? 'budget_exhausted'
-    : turns >= arm.maxTurns
-      ? 'max_turns'
-      : 'voluntary_stop';
+  const committed = commitRunSafely(paths.workspace, runNumber, log, arm);
+  const terminalReason: TerminalReason = committed ? outcome.terminalReason : 'harness_error';
 
   log.append(runNumber, 'run_ended', {
     terminalReason,
@@ -239,6 +256,34 @@ export async function runOnce(arm: ArmConfig, paths: Paths): Promise<TerminalRea
   });
 
   return terminalReason;
+}
+
+type TerminalOutcome = { terminalReason: TerminalReason; budgetExhaustedNow: boolean };
+
+/**
+ * The PreToolUse hook only catches budget exhaustion when the agent attempts
+ * another tool call afterward — if the turn that crosses budget is the
+ * session's last, no hook fires. Re-checking usage against budget here,
+ * independent of the hook, catches that case too. `budgetExhaustedNow`
+ * distinguishes it from the hook-detected case so the caller logs the event
+ * exactly once rather than duplicating it.
+ */
+export function resolveTerminalReason(opts: {
+  budgetHit: boolean;
+  usage: Usage;
+  budgetTokens: number;
+  turns: number;
+  maxTurns: number;
+}): TerminalOutcome {
+  const overBudget = billedTokens(opts.usage) >= opts.budgetTokens;
+  if (opts.budgetHit || overBudget) {
+    return { terminalReason: 'budget_exhausted', budgetExhaustedNow: !opts.budgetHit };
+  }
+  if (opts.turns >= opts.maxTurns) {
+    return { terminalReason: 'max_turns', budgetExhaustedNow: false };
+  }
+  // Stopping with budget left is a choice, and choices are the data.
+  return { terminalReason: 'voluntary_stop', budgetExhaustedNow: false };
 }
 
 /**
@@ -341,7 +386,22 @@ function truncate(value: unknown, max = 8_000): unknown {
   return text.length <= max ? value : text.slice(0, max) + `… [${text.length - max} chars omitted]`;
 }
 
-function snapshotWorkspace(workspace: string): EventPayloads['run_started']['workspaceFiles'] {
+/**
+ * Writes content once per unique sha256, so re-snapshotting the same file
+ * across runs — the workspace only grows and is never wiped — costs nothing
+ * after the first time. Growth then tracks distinct content, not run count.
+ */
+export function writeBlob(blobsDir: string, content: string): string {
+  const hash = sha256(content);
+  const path = join(blobsDir, hash);
+  if (!existsSync(path)) {
+    mkdirSync(blobsDir, { recursive: true });
+    writeFileSync(path, content);
+  }
+  return hash;
+}
+
+export function snapshotWorkspace(workspace: string, blobsDir: string): EventPayloads['run_started']['workspaceFiles'] {
   const out: EventPayloads['run_started']['workspaceFiles'] = [];
   const walk = (dir: string) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -353,8 +413,7 @@ function snapshotWorkspace(workspace: string): EventPayloads['run_started']['wor
         out.push({
           path: relative(workspace, full),
           bytes: statSync(full).size,
-          sha256: sha256(body),
-          content: body,
+          sha256: writeBlob(blobsDir, body),
         });
       }
     }
@@ -374,12 +433,28 @@ function ensureGitRepo(workspace: string): void {
   git(workspace, ['config', 'user.name', 'agent']);
 }
 
+const STALE_LOCK_AGE_MS = 60_000;
+
+/**
+ * A container killed mid-commit leaves `.git/index.lock` behind, and it lives
+ * on the persistent volume — so left alone, one killed run bricks every
+ * commit after it, forever. Age-gated: a lock younger than the threshold is
+ * left alone rather than stolen, since it could be a commit genuinely still
+ * in flight.
+ */
+export function clearStaleIndexLock(workspace: string): void {
+  const lockPath = join(workspace, '.git', 'index.lock');
+  if (!existsSync(lockPath)) return;
+  if (Date.now() - statSync(lockPath).mtimeMs > STALE_LOCK_AGE_MS) rmSync(lockPath);
+}
+
 /**
  * The workspace is a git repo and the harness commits at the end of every run,
  * which buys versioned memory and a human-legible behavioural history. The
  * diff goes into the event log too, so nothing ever has to open a git host.
  */
 function commitRun(workspace: string, runNumber: number, log: EventLog, arm: ArmConfig): void {
+  clearStaleIndexLock(workspace);
   git(workspace, ['add', '-A']);
   const staged = git(workspace, ['diff', '--cached', '--numstat']).trim();
   if (staged === '') return;
@@ -403,4 +478,24 @@ function commitRun(workspace: string, runNumber: number, log: EventLog, arm: Arm
     deletions,
     diff,
   });
+}
+
+/**
+ * Unwrapped, a commit failure (disk full, a lock stolen from under a
+ * concurrent process) would propagate out of `runOnce` and take the run's
+ * `commit` and `run_ended` events with it — a run that spent real money then
+ * shows as "in progress" forever. Recorded as a harness_error instead; the
+ * caller downgrades the run's terminal reason when this returns false.
+ */
+export function commitRunSafely(workspace: string, runNumber: number, log: EventLog, arm: ArmConfig): boolean {
+  try {
+    commitRun(workspace, runNumber, log, arm);
+    return true;
+  } catch (err) {
+    log.append(runNumber, 'harness_error', {
+      message: `commit failed: ${(err as Error).message}`,
+      stack: (err as Error).stack,
+    });
+    return false;
+  }
 }

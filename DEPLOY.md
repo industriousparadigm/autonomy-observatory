@@ -47,10 +47,55 @@ railway domain --service harness
 | `TZ`, `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_DISABLE_AUTO_MEMORY`, `DATA_ROOT`, `HOSTNAME` | Fixed by the experiment design | Baked into the Dockerfile — nothing to do |
 | `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN` | Must NOT exist | Don't set them. If they're already present at the project or shared-variables level, remove them — `entrypoint.sh` refuses to start if either is set, so a misconfigured service fails loudly instead of quietly running unisolated. |
 | `PORT` | Injected by Railway automatically once a domain exists | Don't set it yourself — a manual value can conflict with what Railway routes to. |
+| `WORKSPACE_REPO`, `DATA_REPO` | The two GitHub repos `backup.sh` mirrors to (see "Offsite backup" below) | `railway variable set`, using the `github-workspace-a` / `github-data` SSH aliases, e.g. `git@github-data:you/observatory-log.git` |
+| `DEPLOY_KEY_WORKSPACE_A_B64`, `DEPLOY_KEY_DATA_B64` | A base64'd SSH deploy key (write access) for each repo above | `railway variable set --service harness DEPLOY_KEY_DATA_B64="$(base64 < path/to/key)"` |
+| `HEALTHCHECK_URL` | A healthchecks.io check's ping URL (optional; see "Detecting a missed or failed run" below) | `railway variable set`. Omit entirely to leave the heartbeat off. |
 
 Verify nothing extra leaked in: `railway variable list --service harness` and
 confirm the only things you don't recognize from this table are Railway's own
 (`RAILWAY_*`).
+
+## Offsite backup: creating the two repos
+
+`backup.sh` mirrors two things off the Railway volume after every run: the
+agent's workspace (`WORKSPACE_REPO`) and the event log (`DATA_REPO`). Each is
+authenticated with its own deploy key and reached through the
+`github-workspace-a` / `github-data` SSH aliases `entrypoint.sh` writes to
+`~/.ssh/config` — that alias, not `github.com` directly, is what selects the
+right key, so both variables must be written in that form.
+
+**Create both repos completely empty.** Do not tick "Add a README file", and
+don't add a `.gitignore` or license template. Any of those gives the repo an
+initial commit with no shared history with the harness's own — the first
+push is then rejected as non-fast-forward. `backup.sh` recovers from this
+automatically (fetch, then `push --force-with-lease`: the harness is the sole
+writer to both repos, so its local history is always the complete record and
+safe to force onto a remote that only ever diverges by way of this
+initializer commit) but an empty repo avoids the situation, and the one extra
+reconcile it costs, in the first place.
+
+## Detecting a missed or failed run (heartbeat)
+
+Nothing above watches whether a scheduled fire actually happened — the
+observatory web server stays green regardless, and stale data on the site is
+otherwise the only symptom. `run-arm.sh` closes this with an optional
+heartbeat, following the healthchecks.io ping convention:
+
+- Set `HEALTHCHECK_URL` to a healthchecks.io check's ping URL
+  (`https://hc-ping.com/<uuid>`) and `run-arm.sh` pings it after every fire —
+  the bare URL on success, `<HEALTHCHECK_URL>/fail` if either the agent's run
+  or the backup step failed. A backup that silently stops advancing (the
+  failure mode `backup.sh` used to be able to hide) now trips this the same
+  as a crashed run.
+- **Off by default, safe by default.** Leave `HEALTHCHECK_URL` unset and
+  nothing is ever contacted — no third-party account is required to run this
+  experiment.
+- Set the check's schedule in healthchecks.io to match `crontab.harness`:
+  period ~6h (the widest gap between 06:17/12:17/18:17/23:17), with enough
+  grace (~1h) to cover a slow run without false-alerting. A missed or failed
+  fire then shows as the check going "Late" or "Down" on the healthchecks.io
+  dashboard (and by email/Slack/whatever that check is wired to) — that's the
+  "somebody would find out" this experiment was otherwise missing.
 
 ## Why not Railway's own `cronSchedule`
 
@@ -87,9 +132,9 @@ retries, so if the container crashes for any reason (not sleep — an actual
 crash), Railway restarts it rather than leaving it dead until someone notices.
 The one gap this doesn't close: if the container is down for any reason
 (crash-restart cycling, a bad deploy) across a scheduled fire time, that fire
-is lost — there's no catch-up mechanism. Worth an external uptime check
-(pinging the domain) if a missed fire ever needs to be *known about* rather
-than just rare.
+is lost — there's no catch-up mechanism. See "Detecting a missed or failed
+run" above for how to actually find out when that happens, rather than just
+assuming it's rare.
 
 ## Verifying the deploy is healthy
 
@@ -134,8 +179,8 @@ Validated locally (Docker daemon on this Mac, `docker build` + `docker run`,
 - Multi-stage build succeeds for the harness stage (`npm ci --omit=dev`
   against the real `package.json`/`package-lock.json`).
 - The runtime stage builds and runs against a **stubbed** observatory output
-  (real `observatory/` has code now but doesn't typecheck yet — that's the
-  other agent's in-progress work, not this Dockerfile).
+  (real `observatory/` had code but didn't typecheck yet at this point — see
+  the 10 Aug entry below for the real build).
 - `/app` is root-owned and unwritable by both `harness` and `agent`
   (confirmed both get `Permission denied`).
 - `/data/workspaces`, `/data/logs`, `/data/claude-config` are chowned to
@@ -157,18 +202,48 @@ Validated locally (Docker daemon on this Mac, `docker build` + `docker run`,
 - Stale-lock reclaim: a lock backdated 4 hours was correctly reclaimed and
   the run proceeded.
 
+Validated locally (10 Aug 2026, this pass — `backup.sh` reconciliation and
+the heartbeat):
+- The runtime image now builds against the **real** `observatory/` (it
+  typechecks and builds cleanly as of this pass — superseding the "doesn't
+  typecheck yet" note this section used to carry).
+- Wedged index (`.git/index.lock` present): against a throwaway repo,
+  `git add -A` fails and `git diff --cached --quiet` still reports clean —
+  confirmed `backup.sh` now logs "git add failed, index may be wedged"
+  distinctly, instead of the previous "no new events to commit", and returns
+  a non-zero exit. Confirmed no event was lost: the missed line was picked up
+  and committed on the very next run.
+- Diverged remote (bare repo seeded with an unrelated "Initial commit",
+  reproducing the GitHub "Add a README" case): the first push was rejected
+  non-fast-forward, `backup.sh` fetched and force-with-lease-pushed past it
+  automatically in the same run, and every subsequent push was a normal
+  fast-forward. No committed event was ever lost across the divergence.
+- Unreachable remote: push and the fetch-and-retry both fail distinctly and
+  `backup.sh` exits non-zero, rather than the old unconditional success.
+- Heartbeat, in a running container (real `entrypoint.sh` → `supervisord` →
+  manually fired `run-arm.sh a`, pinging a local mock HTTP server standing in
+  for healthchecks.io): a normal run (dummy key → `harness_error`, backup
+  skipped for no ssh keys) pinged the bare `HEALTHCHECK_URL`; forcing the
+  backup step to fail (bad deploy key, unreachable `DATA_REPO`) while the
+  agent run itself still exited 0 correctly pinged `${HEALTHCHECK_URL}/fail`
+  instead — proving a silent backup failure is no longer indistinguishable
+  from a healthy run. With `HEALTHCHECK_URL` unset, confirmed zero network
+  calls (no curl output, no hit on the mock server) and confirmed the
+  variable survives into `/run/harness.env` when it is set, so it reaches a
+  cron-triggered run and not just a manual one.
+- The real standalone `server.js` starts cleanly under `supervisord` and
+  serves `200` at `/` — the module-type and healthcheck-path risks this
+  section used to flag as unresolved are both resolved now that the real
+  build exists to check against.
+
 **Not validated** (can't be, without deploying, and not something I should
 be the one to deploy):
-- The real observatory build (it doesn't typecheck yet).
-- Whether Next's real standalone output's own `package.json` correctly
-  declares its module type — see the risk note below; the stub needed one
-  added by hand to run at all, which is a real (if likely self-resolving)
-  interaction worth confirming once the real build exists.
+- A real healthchecks.io check and real GitHub repos end-to-end — the above
+  used a synthetic ping target and local bare repos, not the real services.
 - Anything about actual Railway behavior (volume mount permissions on
   Railway's infrastructure specifically, whether `railway add --service`
   with no image/repo behaves as assumed, real cron fire timing over a DST
   boundary).
-- The observatory's real healthcheck path/response.
 
 ## Fallback if the volume looks unwritable on Railway specifically
 

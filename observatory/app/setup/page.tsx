@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { FileModalProvider, FilePathButton } from '@/components/FileModal';
+import { resolveWorkspaceFileContent } from '@/lib/blobs';
 import { buildFilePreview } from '@/lib/markdown';
 import { loadRunStartedEvents, observedCadenceMs, timezoneFromWakeMessage, type RunStartedRecord } from '@/lib/setup';
 import { formatCompact, formatElapsedGap, formatWallClock } from '@/lib/format';
@@ -63,11 +64,8 @@ function WakeContextPanel({ record }: { record: RunStartedRecord }) {
             </thead>
             <tbody>
               {p.workspaceFiles.map((f) => {
-                const preview = buildFilePreview(
-                  f.path,
-                  f.content ?? null,
-                  f.content === undefined ? 'This run predates recording file contents at wake — only the hash was kept.' : undefined,
-                );
+                const resolved = resolveWorkspaceFileContent(f);
+                const preview = buildFilePreview(f.path, resolved.content, resolved.unavailableReason);
                 return (
                   <tr key={f.path}>
                     <td>

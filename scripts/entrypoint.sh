@@ -67,7 +67,7 @@ su -s /bin/sh -c 'git config --global --add safe.directory "*"' agent 2>/dev/nul
 umask 077
 : > /run/harness.env
 for v in ANTHROPIC_API_KEY DATA_ROOT CLAUDE_CONFIG_DIR CLAUDE_CODE_DISABLE_AUTO_MEMORY \
-         WORKSPACE_REPO DATA_REPO ARM TZ; do
+         WORKSPACE_REPO DATA_REPO ARM TZ HEALTHCHECK_URL; do
   eval "value=\${$v:-}"
   [ -n "$value" ] && printf '%s=%s\n' "$v" "$value" >> /run/harness.env
 done

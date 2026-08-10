@@ -43,6 +43,9 @@ export type Paths = {
   workspace: string;
   eventLog: string;
   claudeConfigDir: string;
+  /** Content-addressed store for workspace file snapshots, keyed by sha256.
+   *  Shared across arms and runs, since content is what's deduplicated. */
+  blobsDir: string;
 };
 
 export function pathsFor(arm: ArmConfig, dataRoot: string): Paths {
@@ -50,5 +53,6 @@ export function pathsFor(arm: ArmConfig, dataRoot: string): Paths {
     workspace: `${dataRoot}/workspaces/${arm.id}`,
     eventLog: `${dataRoot}/logs/${arm.id}.jsonl`,
     claudeConfigDir: `${dataRoot}/claude-config`,
+    blobsDir: `${dataRoot}/blobs`,
   };
 }
