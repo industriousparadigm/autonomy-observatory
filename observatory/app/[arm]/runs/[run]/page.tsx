@@ -4,9 +4,13 @@ import { Header } from '@/components/Header';
 import { UsageMeter } from '@/components/UsageMeter';
 import { TerminalPill } from '@/components/TerminalPill';
 import { FileModalProvider } from '@/components/FileModal';
+import { RunSummaryPanel } from '@/components/RunSummaryPanel';
 import { renderNode } from '@/components/renderers/registry';
 import { loadRunEvents } from '@/lib/runs';
+import { eventLogPath } from '@/lib/log';
+import { discoverArms, findArm } from '@/lib/arms';
 import { buildTranscript } from '@/lib/transcript';
+import { deriveRunSummary } from '@/lib/summary';
 import { CategoryAccumulator } from '@/lib/budget';
 import { CATEGORY_ORDER, CATEGORY_LABEL } from '@/lib/categories';
 import type { RunEvent } from '@/lib/events';
@@ -14,12 +18,16 @@ import { formatWallClock, formatElapsedGap, formatDuration, formatUsd, formatCom
 
 export const dynamic = 'force-dynamic';
 
-export default async function RunDetailPage({ params }: { params: Promise<{ run: string }> }) {
-  const { run: runParam } = await params;
+export default async function RunDetailPage({ params }: { params: Promise<{ arm: string; run: string }> }) {
+  const { arm: armId, run: runParam } = await params;
   const run = Number(runParam);
   if (!Number.isInteger(run)) notFound();
 
-  const { events } = await loadRunEvents(run);
+  const arms = discoverArms();
+  const arm = findArm(arms, armId);
+  if (!arm) notFound();
+
+  const { events } = await loadRunEvents(run, eventLogPath(armId));
   if (events.length === 0) notFound();
 
   const started = events.find((e) => e.type === 'run_started');
@@ -37,20 +45,21 @@ export default async function RunDetailPage({ params }: { params: Promise<{ run:
 
   const wake = started?.payload as RunEvent<'run_started'>['payload'] | undefined;
   const transcript = buildTranscript(events);
+  const summary = deriveRunSummary(transcript);
 
   return (
     <>
-      <Header active="run-detail" />
+      <Header active="run-detail" arms={arms} currentArm={arm} />
       <div className="shell">
         <p>
-          <Link href="/">← Run timeline</Link>
+          <Link href={`/${armId}`}>← {arm.label} timeline</Link>
         </p>
         <h1>
           Run #{run} <TerminalPill reason={ended ? (ended.payload as RunEvent<'run_ended'>['payload']).terminalReason : null} inProgress={inProgress} crashed={crashed} />
         </h1>
         <p className="page-sub">
           {wake ? formatWallClock(started!.ts) : ''} {wake?.elapsedMs != null ? `· ${formatElapsedGap(wake.elapsedMs)} since previous run` : ''}{' '}
-          {wake?.model ? `· ${wake.model}` : ''} · <Link href={`/setup?run=${run}`}>view full wake context</Link>
+          {wake?.model ? `· ${wake.model}` : ''} · <Link href={`/${armId}/setup?run=${run}`}>view full wake context</Link>
         </p>
 
         {inProgress ? (
@@ -95,11 +104,20 @@ export default async function RunDetailPage({ params }: { params: Promise<{ run:
           ))}
         </div>
 
-        <h2>Wake message</h2>
-        <pre className="wake-message">{wake?.wakeMessage ?? '(no run_started event recorded for this run)'}</pre>
-
-        <h2>Transcript</h2>
         <FileModalProvider>
+          <RunSummaryPanel summary={summary} />
+
+          <h2>Wake message</h2>
+          <pre className="wake-message">{wake?.wakeMessage ?? '(no run_started event recorded for this run)'}</pre>
+
+          <h2>Transcript</h2>
+          {transcript.some((n) => n.kind === 'assistant_turn' && n.groupingInferred) ? (
+            <p className="note">
+              This run predates the link between a turn and the calls it issued, so calls are
+              grouped by their position in the log. Some of this run&rsquo;s tool calls were also
+              never recorded. Runs from 11 Aug carry the full record.
+            </p>
+          ) : null}
           <div className="transcript">{transcript.map((node) => renderNode(node, node.seq))}</div>
         </FileModalProvider>
       </div>

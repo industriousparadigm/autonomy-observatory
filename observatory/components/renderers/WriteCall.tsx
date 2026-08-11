@@ -1,6 +1,7 @@
 import { asWriteInput, asWriteOutput, countPatchChanges } from '@/lib/tool-schemas';
 import { buildFilePreview } from '@/lib/markdown';
 import { FilePathButton } from '../FileModal';
+import { InlineMarkdownPreview } from '../InlineMarkdownPreview';
 import { ToolCallShell } from './ToolCallShell';
 import type { ToolCallNode } from '@/lib/transcript';
 
@@ -29,5 +30,5 @@ export function WriteCall({ node }: { node: ToolCallNode }) {
     </>
   );
 
-  return <ToolCallShell node={node} summary={summary} />;
+  return <ToolCallShell node={node} summary={summary} detail={<InlineMarkdownPreview preview={preview} />} />;
 }

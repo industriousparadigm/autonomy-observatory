@@ -1,21 +1,29 @@
+import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { Expandable } from '@/components/Expandable';
 import { loadBoundaryProbes, PROBE_KIND_ORDER, PROBE_KIND_LABEL } from '@/lib/probes';
+import { eventLogPath } from '@/lib/log';
+import { discoverArms, findArm } from '@/lib/arms';
 import { formatWallClock, prettyValue } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
-export default async function ProbesPage() {
-  const { probes, corruptLines, logExists } = await loadBoundaryProbes();
+export default async function ProbesPage({ params }: { params: Promise<{ arm: string }> }) {
+  const { arm: armId } = await params;
+  const arms = discoverArms();
+  const arm = findArm(arms, armId);
+  if (!arm) notFound();
+
+  const { probes, corruptLines, logExists } = await loadBoundaryProbes(eventLogPath(armId));
 
   const byKind = new Map(PROBE_KIND_ORDER.map((k) => [k, probes.filter((p) => p.kind === k)]));
 
   return (
     <>
-      <Header active="probes" meta={`${probes.length} total`} />
+      <Header active="probes" arms={arms} currentArm={arm} meta={`${probes.length} total`} />
       <div className="shell">
-        <h1>Boundary probes</h1>
+        <h1>Boundary probes · {arm.label}</h1>
         <p className="page-sub">Every attempt to act outside the workspace, modify the schedule, or inspect the harness. All were blocked; every one is recorded in full.</p>
 
         {corruptLines > 0 ? (
@@ -43,7 +51,7 @@ export default async function ProbesPage() {
                   {list.map((p) => (
                     <div className="turn turn--boundary_probe" key={p.seq}>
                       <div className="kind">
-                        <Link href={`/runs/${p.run}`}>Run #{p.run}</Link> · {formatWallClock(p.ts)} · {p.toolName}
+                        <Link href={`/${armId}/runs/${p.run}`}>Run #{p.run}</Link> · {formatWallClock(p.ts)} · {p.toolName}
                       </div>
                       <p style={{ margin: '0.3rem 0' }}>
                         <strong>Denied:</strong> {p.denialReason}

@@ -3,6 +3,7 @@ import { buildFilePreview } from '@/lib/markdown';
 import { structuredPatchToUnifiedDiff } from '@/lib/diff';
 import { FilePathButton } from '../FileModal';
 import { DiffView } from '../DiffView';
+import { InlineMarkdownPreview } from '../InlineMarkdownPreview';
 import { ToolCallShell } from './ToolCallShell';
 import type { ToolCallNode } from '@/lib/transcript';
 
@@ -35,12 +36,16 @@ export function EditCall({ node }: { node: ToolCallNode }) {
     </>
   );
 
-  const detail =
-    output && output.structuredPatch.length > 0 ? (
-      <div className="tool-diff">
-        <DiffView diff={structuredPatchToUnifiedDiff(path, output.structuredPatch)} />
-      </div>
-    ) : undefined;
+  const detail = (
+    <>
+      <InlineMarkdownPreview preview={preview} />
+      {output && output.structuredPatch.length > 0 ? (
+        <div className="tool-diff">
+          <DiffView diff={structuredPatchToUnifiedDiff(path, output.structuredPatch)} />
+        </div>
+      ) : null}
+    </>
+  );
 
   return <ToolCallShell node={node} summary={summary} detail={detail} />;
 }

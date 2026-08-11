@@ -1,9 +1,12 @@
+import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { FileModalProvider, FilePathButton } from '@/components/FileModal';
 import { resolveWorkspaceFileContent } from '@/lib/blobs';
 import { buildFilePreview } from '@/lib/markdown';
 import { loadRunStartedEvents, observedCadenceMs, timezoneFromWakeMessage, type RunStartedRecord } from '@/lib/setup';
+import { eventLogPath } from '@/lib/log';
+import { discoverArms, findArm, PROMPT_VARIANT_NOTE } from '@/lib/arms';
 import { formatCompact, formatElapsedGap, formatWallClock } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
@@ -84,16 +87,28 @@ function WakeContextPanel({ record }: { record: RunStartedRecord }) {
   );
 }
 
-export default async function SetupPage({ searchParams }: { searchParams: Promise<{ run?: string }> }) {
+export default async function SetupPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ arm: string }>;
+  searchParams: Promise<{ run?: string }>;
+}) {
+  const { arm: armId } = await params;
   const { run: runParam } = await searchParams;
-  const { records, logExists } = await loadRunStartedEvents();
+
+  const arms = discoverArms();
+  const arm = findArm(arms, armId);
+  if (!arm) notFound();
+
+  const { records, logExists } = await loadRunStartedEvents(eventLogPath(armId));
 
   if (!logExists || records.length === 0) {
     return (
       <>
-        <Header active="setup" />
+        <Header active="setup" arms={arms} currentArm={arm} />
         <div className="shell">
-          <h1>Setup &amp; docs</h1>
+          <h1>Setup &amp; docs · {arm.label}</h1>
           <div className="empty-state">
             <h2>Nothing recorded yet</h2>
             <p>
@@ -113,9 +128,9 @@ export default async function SetupPage({ searchParams }: { searchParams: Promis
 
   return (
     <>
-      <Header active="setup" />
+      <Header active="setup" arms={arms} currentArm={arm} />
       <div className="shell">
-        <h1>Setup &amp; docs</h1>
+        <h1>Setup &amp; docs · {arm.label}</h1>
         <p className="page-sub">
           Everything the agent is given, verbatim, so it is easy to confirm by eye that the prompts carry no instruction, no goal, and no framing —
           nothing on this page is summarized or reworded from what was actually logged.
@@ -148,11 +163,16 @@ export default async function SetupPage({ searchParams }: { searchParams: Promis
           Tools: {latest.payload.toolNames ? latest.payload.toolNames.join(', ') : <em>not recorded for this run</em>}. Cadence above is the median gap
           between recent wakes, measured from the log — the log has no separate field for a declared schedule.
         </p>
+        {arm.promptVariant ? (
+          <p className="page-sub">
+            Prompt variant: <strong>{arm.promptVariant}</strong> — {PROMPT_VARIANT_NOTE[arm.promptVariant]}
+          </p>
+        ) : null}
 
         <h2>Wake context for a specific run</h2>
         <div className="filters">
           {records.slice(0, 40).map((r) => (
-            <Link key={r.run} href={`/setup?run=${r.run}`} className={selected.run === r.run ? 'active' : ''}>
+            <Link key={r.run} href={`/${armId}/setup?run=${r.run}`} className={selected.run === r.run ? 'active' : ''}>
               #{r.run}
             </Link>
           ))}

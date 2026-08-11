@@ -141,6 +141,67 @@ nav.tabs a.active {
   color: var(--text-faint);
 }
 
+/* --- arm switcher --- */
+.inner.arm-bar {
+  padding-top: 0;
+  padding-bottom: 0.9rem;
+  align-items: center;
+  gap: 0.9rem;
+}
+
+.arm-bar-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.arm-switcher {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.arm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  text-decoration: none;
+  font-size: 0.78rem;
+  color: var(--text-soft);
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.28rem 0.75rem;
+}
+
+.arm-chip:hover {
+  color: var(--text);
+}
+
+.arm-chip.active {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
+.arm-chip--empty {
+  color: var(--text-faint);
+}
+
+.arm-chip-note {
+  font-size: 0.68rem;
+  color: var(--text-faint);
+}
+
+.arm-meta {
+  font-size: 0.76rem;
+  color: var(--text-faint);
+  margin-left: auto;
+}
+
 h1 {
   font-size: 1.55rem;
   margin: 0 0 0.3rem;
@@ -769,6 +830,30 @@ h4 {
   font-style: italic;
 }
 
+/* One or more turns that produced nothing worth a card of their own. */
+.quiet-stretch {
+  padding: 0.4rem 1.05rem;
+  font-size: 0.78rem;
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+/* A written file's rendered content, inline under the call that wrote it. */
+.inline-file-preview {
+  margin-top: 0.6rem;
+  background: var(--code-bg);
+}
+
+.inline-file-preview summary {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  color: var(--text-soft);
+}
+
+.inline-file-preview .markdown-body {
+  padding-top: 0.3rem;
+}
+
 /* --- file modal --- */
 dialog.file-modal {
   width: min(760px, 92vw);
@@ -919,4 +1004,50 @@ dialog.file-modal::backdrop {
 .wake-context {
   padding: 1.3rem 1.5rem 1.6rem;
   margin-top: 1rem;
+}
+
+/* --- run summary (the run page's lead) --- */
+.run-summary {
+  padding: 1.2rem 1.4rem 1.5rem;
+  margin-bottom: 1.8rem;
+}
+
+.run-summary h4:first-child {
+  margin-top: 0;
+}
+
+.summary-filelists {
+  display: flex;
+  gap: 2.4rem;
+  flex-wrap: wrap;
+}
+
+.summary-filelist-label {
+  display: block;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+  margin-bottom: 0.3rem;
+}
+
+.summary-filelist ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.summary-filelist li {
+  margin: 0.15rem 0;
+}
+
+.reasoning-trail {
+  margin: 0;
+  padding-left: 1.3rem;
+}
+
+.reasoning-trail li {
+  margin: 0.5rem 0;
+  font-size: 0.92rem;
+  color: var(--text-soft);
 }

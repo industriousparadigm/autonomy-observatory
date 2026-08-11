@@ -1,11 +1,11 @@
 /** Data for the Setup & docs section: what the agent was actually given, per run. */
 
 import type { EventPayloads } from './events';
-import { reduceEventLog, eventLogPath } from './log';
+import { reduceEventLog } from './log';
 
 export type RunStartedRecord = { run: number; ts: string; payload: EventPayloads['run_started'] };
 
-export async function loadRunStartedEvents(path: string = eventLogPath()): Promise<{
+export async function loadRunStartedEvents(path: string): Promise<{
   records: RunStartedRecord[];
   logExists: boolean;
 }> {

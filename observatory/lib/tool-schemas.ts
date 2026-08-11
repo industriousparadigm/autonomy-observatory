@@ -26,6 +26,25 @@ function bool(v: unknown): boolean | null {
   return typeof v === 'boolean' ? v : null;
 }
 
+/**
+ * A tool_result's `result` can arrive as a JSON string rather than the
+ * already-parsed object every reader below expects — either because it was
+ * genuinely serialized that way, or because harness.ts's `truncate` cut a
+ * large result down to a string at 8,000 characters (observed in production:
+ * a Write/Edit result on a long file, cut mid-string). The first case is
+ * recoverable; the second isn't (the JSON is cut off, not just stringified),
+ * so this returns the original string unchanged when parsing fails rather
+ * than throwing — callers already treat "not a record" as "shape unknown".
+ */
+function normalizeResult(result: unknown): unknown {
+  if (typeof result !== 'string') return result;
+  try {
+    return JSON.parse(result);
+  } catch {
+    return result;
+  }
+}
+
 export type ReadInput = { file_path: string; offset?: number; limit?: number };
 export function asReadInput(input: unknown): ReadInput | null {
   if (!isRecord(input)) return null;
@@ -35,7 +54,8 @@ export function asReadInput(input: unknown): ReadInput | null {
 }
 
 export type ReadOutput = { content: string; numLines: number; startLine: number; totalLines: number };
-export function asReadOutput(result: unknown): ReadOutput | null {
+export function asReadOutput(rawResult: unknown): ReadOutput | null {
+  const result = normalizeResult(rawResult);
   if (!isRecord(result) || result.type !== 'text' || !isRecord(result.file)) return null;
   const f = result.file;
   const content = str(f.content);
@@ -67,7 +87,8 @@ export type WriteOutput = {
   originalFile: string | null;
   userModified?: boolean;
 };
-export function asWriteOutput(result: unknown): WriteOutput | null {
+export function asWriteOutput(rawResult: unknown): WriteOutput | null {
+  const result = normalizeResult(rawResult);
   if (!isRecord(result)) return null;
   const type = result.type;
   if (type !== 'create' && type !== 'update') return null;
@@ -103,7 +124,8 @@ export type EditOutput = {
   userModified: boolean;
   replaceAll: boolean;
 };
-export function asEditOutput(result: unknown): EditOutput | null {
+export function asEditOutput(rawResult: unknown): EditOutput | null {
+  const result = normalizeResult(rawResult);
   if (!isRecord(result)) return null;
   const filePath = str(result.filePath);
   const oldString = str(result.oldString);
@@ -162,5 +184,33 @@ export function describeGenericInput(input: unknown): string | null {
   const path = str(input.path);
   if (pattern !== null) return path ? `${pattern} in ${path}` : pattern;
   if (path !== null) return path;
+  return null;
+}
+
+const RESULT_TEXT_KEYS = ['stdout', 'result', 'output', 'text', 'content'];
+
+/**
+ * Best-effort one-line preview of what a tool without a dedicated renderer
+ * actually returned — "what came back" matters as much as "what it did", and
+ * without this a Bash/WebFetch/WebSearch result was visible only behind the
+ * raw-JSON disclosure. Recognizes the common result shapes (a bare string; an
+ * object with a stdout/result/output/text/content string; an array of
+ * results, as WebSearch returns) and truncates to a preview length — the full
+ * value is always available behind ToolCallShell's disclosure regardless.
+ */
+export function describeGenericOutput(rawResult: unknown): string | null {
+  const result = normalizeResult(rawResult);
+  if (typeof result === 'string') return result.trim() || null;
+  if (Array.isArray(result)) {
+    if (result.length === 0) return '0 results';
+    const first = result[0];
+    const label = isRecord(first) ? (str(first.title) ?? str(first.url) ?? null) : null;
+    return label ? `${result.length} result${result.length === 1 ? '' : 's'}, first: ${label}` : `${result.length} result${result.length === 1 ? '' : 's'}`;
+  }
+  if (!isRecord(result)) return null;
+  for (const key of RESULT_TEXT_KEYS) {
+    const value = str(result[key]);
+    if (value !== null && value.trim() !== '') return value.trim();
+  }
   return null;
 }

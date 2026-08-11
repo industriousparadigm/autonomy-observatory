@@ -1,143 +1,98 @@
-import path from 'node:path';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
-import { RunFlags, isFlagged } from '@/components/Pills';
-import { UsageMeter } from '@/components/UsageMeter';
-import { RunRow } from '@/components/RunRow';
-import { LinkPendingDot } from '@/components/LinkPendingDot';
-import { loadRunSummaries } from '@/lib/runs';
-import { eventLogPath } from '@/lib/log';
-import { formatElapsedGap, formatWallClock, truncate } from '@/lib/format';
+import { discoverArms, findArm } from '@/lib/arms';
+import { loadArmStats, isolationLabel, TERMINAL_MIX_LABEL, TERMINAL_MIX_PILL_CLASS } from '@/lib/compare';
+import { formatCompact, formatUsd } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
-type FilterKey = 'all' | 'probes' | 'stops' | 'exhausted' | 'errors' | 'in_progress';
+export default async function ComparePage() {
+  const arms = discoverArms();
 
-function changesSummary(run: { commitCount: number; filesChanged: number; insertions: number; deletions: number; changedFiles: string[] }): string {
-  if (run.commitCount === 0) return 'no workspace changes';
-  const files = run.changedFiles.slice(0, 3).map((f) => f.split('/').pop()).join(', ');
-  const more = run.changedFiles.length > 3 ? ` +${run.changedFiles.length - 3} more` : '';
-  return `${files}${more} (+${run.insertions}/-${run.deletions})`;
-}
+  if (arms.length === 0) {
+    return (
+      <>
+        <Header active="compare" arms={arms} currentArm={null} />
+        <div className="shell">
+          <h1>Compare arms</h1>
+          <div className="empty-state">
+            <h2>No arms found</h2>
+            <p>
+              Nothing under <code>LOGS_DIR</code> and no <code>arms/*.yaml</code> readable from here.
+            </p>
+          </div>
+        </div>
+      </>
+    );
+  }
 
-export default async function TimelinePage({ searchParams }: { searchParams: Promise<{ filter?: string }> }) {
-  const { filter: filterParam } = await searchParams;
-  const filter = (filterParam ?? 'all') as FilterKey;
-  const logPath = eventLogPath();
-  const { runs, corruptLines, logExists } = await loadRunSummaries(logPath);
-
-  const counts = {
-    all: runs.length,
-    probes: runs.filter((r) => r.boundaryProbeCount > 0).length,
-    stops: runs.filter((r) => r.terminalReason === 'voluntary_stop').length,
-    exhausted: runs.filter((r) => r.budgetExhausted || r.terminalReason === 'budget_exhausted').length,
-    errors: runs.filter((r) => r.crashed || r.terminalReason === 'harness_error').length,
-    in_progress: runs.filter((r) => r.inProgress && !r.crashed).length,
-  };
-
-  const filtered = runs.filter((r) => {
-    switch (filter) {
-      case 'probes':
-        return r.boundaryProbeCount > 0;
-      case 'stops':
-        return r.terminalReason === 'voluntary_stop';
-      case 'exhausted':
-        return r.budgetExhausted || r.terminalReason === 'budget_exhausted';
-      case 'errors':
-        return r.crashed || r.terminalReason === 'harness_error';
-      case 'in_progress':
-        return r.inProgress && !r.crashed;
-      default:
-        return true;
-    }
-  });
-
-  const chips: { key: FilterKey; label: string }[] = [
-    { key: 'all', label: 'All' },
-    { key: 'probes', label: 'Boundary probes' },
-    { key: 'stops', label: 'Voluntary stops' },
-    { key: 'exhausted', label: 'Budget exhausted' },
-    { key: 'errors', label: 'Harness errors' },
-    { key: 'in_progress', label: 'In progress' },
-  ];
+  const stats = await Promise.all(arms.map(loadArmStats));
+  const baseline = findArm(arms, 'a') ?? arms[0] ?? null;
 
   return (
     <>
-      <Header active="timeline" meta={logExists ? `${runs.length} runs · ${path.basename(logPath)}` : path.basename(logPath)} />
+      <Header active="compare" arms={arms} currentArm={null} />
       <div className="shell">
-        <h1>Run timeline</h1>
-        <p className="page-sub">Every wake, newest first. Boundary probes and voluntary stops are flagged red/amber — everything else is a normal run finishing on schedule.</p>
+        <h1>Compare arms</h1>
+        <p className="page-sub">
+          Every arm runs the same harness against the same question — what does it do with unstructured time — with exactly one thing changed per
+          arm. Differences here are the experiment; a single arm's numbers mean nothing without this page.
+        </p>
 
-        {corruptLines > 0 ? (
-          <div className="callout callout--warn">
-            <span className="lbl">Log warning</span>
-            {corruptLines} line{corruptLines === 1 ? '' : 's'} in the event log failed to parse and {corruptLines === 1 ? 'was' : 'were'} skipped.
-          </div>
-        ) : null}
-
-        {!logExists ? (
-          <div className="empty-state">
-            <h2>No runs yet</h2>
-            <p>
-              Waiting on <code>{logPath}</code>. This view will populate the moment run 1 wakes.
-            </p>
-          </div>
-        ) : runs.length === 0 ? (
-          <div className="empty-state">
-            <h2>Log exists, no runs recorded</h2>
-            <p>The event log at {logPath} is empty so far.</p>
-          </div>
-        ) : (
-          <>
-            <div className="filters">
-              {chips.map((c) => (
-                <Link key={c.key} href={c.key === 'all' ? '/' : `/?filter=${c.key}`} className={filter === c.key ? 'active' : ''}>
-                  {c.label}
-                  <span className="count">{counts[c.key]}</span>
-                </Link>
+        <div className="panel" style={{ overflowX: 'auto' }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Arm</th>
+                <th>Isolates</th>
+                <th>Model</th>
+                <th>Tools</th>
+                <th>Runs</th>
+                <th>Avg tokens/run</th>
+                <th>Est. cost</th>
+                <th>Boundary probes</th>
+                <th>Terminal reasons</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stats.map(({ arm, runCount, avgBilled, totalCost, boundaryProbeTotal, terminalMix }) => (
+                <tr key={arm.id}>
+                  <td>
+                    <Link href={`/${arm.id}`} className="run-link">
+                      {arm.label}
+                    </Link>
+                    {!arm.hasLog ? <div className="tool-summary-meta">no runs yet</div> : null}
+                  </td>
+                  <td className="files-preview">{isolationLabel(arm, baseline)}</td>
+                  <td className="files-preview">{arm.model ?? '—'}</td>
+                  <td className="files-preview">{arm.tools ? arm.tools.join(', ') : '—'}</td>
+                  <td className="num">{runCount}</td>
+                  <td className="num">{runCount > 0 ? formatCompact(avgBilled) : '—'}</td>
+                  <td className="num">{runCount > 0 ? formatUsd(totalCost) : '—'}</td>
+                  <td className="num">{boundaryProbeTotal}</td>
+                  <td>
+                    {terminalMix.length === 0 ? (
+                      <span className="files-preview">—</span>
+                    ) : (
+                      <div className="pill-row">
+                        {terminalMix.map(({ key, count }) => (
+                          <span key={key} className={`pill ${TERMINAL_MIX_PILL_CLASS[key]}`}>
+                            {count} {TERMINAL_MIX_LABEL[key]}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+                </tr>
               ))}
-            </div>
+            </tbody>
+          </table>
+        </div>
 
-            <div className="panel" style={{ overflowX: 'auto' }}>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Run</th>
-                    <th>Started</th>
-                    <th>Gap</th>
-                    <th>Tokens</th>
-                    <th>Terminal</th>
-                    <th>Workspace changes</th>
-                    <th>Flags</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((run) => (
-                    <RunRow key={`${run.arm}-${run.run}`} href={`/runs/${run.run}`} className={isFlagged(run) ? 'flag' : undefined}>
-                      <td>
-                        <Link href={`/runs/${run.run}`} className="run-link">
-                          #{run.run}
-                          <LinkPendingDot />
-                        </Link>
-                      </td>
-                      <td className="num">{run.startedAt ? formatWallClock(run.startedAt) : '—'}</td>
-                      <td className="num">{formatElapsedGap(run.elapsedMs)}</td>
-                      <td>
-                        <UsageMeter billed={run.billedTokens} budget={run.budgetTokens} />
-                      </td>
-                      <td>{run.inProgress ? (run.crashed ? 'crashed' : 'running') : run.terminalReason?.replace('_', ' ')}</td>
-                      <td className="files-preview">{truncate(changesSummary(run), 70)}</td>
-                      <td>
-                        <RunFlags run={run} />
-                      </td>
-                    </RunRow>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {filtered.length === 0 ? <p className="page-sub">No runs match this filter.</p> : null}
-          </>
-        )}
+        <p className="page-sub" style={{ marginTop: '1rem' }}>
+          &ldquo;Isolates&rdquo; states the one mechanic that differs from the baseline (arm A) for that row — the whole point of holding everything
+          else constant. See <Link href="/a">arm A&apos;s timeline</Link> for the baseline itself.
+        </p>
       </div>
     </>
   );

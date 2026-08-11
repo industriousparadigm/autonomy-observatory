@@ -1,5 +1,5 @@
 import type { RunEvent, TerminalReason } from './events';
-import { reduceEventLog, eventLogPath } from './log';
+import { reduceEventLog } from './log';
 import { changedFilePaths } from './diff';
 
 export type RunSummary = {
@@ -100,7 +100,7 @@ function apply(builder: Builder, event: RunEvent): void {
 }
 
 /** All runs, newest first. One streaming pass over the log. */
-export async function loadRunSummaries(path: string = eventLogPath()): Promise<{
+export async function loadRunSummaries(path: string): Promise<{
   runs: RunSummary[];
   corruptLines: number;
   logExists: boolean;
@@ -127,10 +127,7 @@ export async function loadRunSummaries(path: string = eventLogPath()): Promise<{
 }
 
 /** Every event belonging to one run, in log order. One streaming pass. */
-export async function loadRunEvents(
-  run: number,
-  path: string = eventLogPath(),
-): Promise<{ events: RunEvent[]; arm: string | null }> {
+export async function loadRunEvents(run: number, path: string): Promise<{ events: RunEvent[]; arm: string | null }> {
   const result = await reduceEventLog(
     path,
     { events: [] as RunEvent[], arm: null as string | null },

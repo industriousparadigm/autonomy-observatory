@@ -14,7 +14,7 @@
 
 import { categoryForTool, CATEGORY_ORDER, type ActivityCategory } from './categories';
 import type { RunEvent } from './events';
-import { reduceEventLog, eventLogPath } from './log';
+import { reduceEventLog } from './log';
 
 export type RunAllocation = {
   run: number;
@@ -65,7 +65,7 @@ export class CategoryAccumulator {
 }
 
 /** Per-run category totals, oldest run first (chronological, for a trend chart). */
-export async function loadBudgetAllocation(path: string = eventLogPath()): Promise<{
+export async function loadBudgetAllocation(path: string): Promise<{
   allocations: RunAllocation[];
   corruptLines: number;
   logExists: boolean;

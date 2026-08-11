@@ -37,6 +37,7 @@ import type {
   BudgetExhaustedNode,
   CommitNode,
   HarnessErrorNode,
+  QuietStretchNode,
   RenderableNode,
   RunEndedNode,
   ToolCallNode,
@@ -52,29 +53,38 @@ import { BudgetExhaustedEntry } from './BudgetExhaustedEntry';
 import { HarnessErrorEntry } from './HarnessErrorEntry';
 import { RunEndedEntry } from './RunEndedEntry';
 
-/** One assistant turn: its text, its summarised reasoning if the model returned any, and the calls it issued, nested. */
+/**
+ * One assistant turn: its summarised reasoning if the model returned any
+ * (open by default — it is the only window into why anything happened),
+ * its narration text, and the calls it issued, nested directly beneath so
+ * "why" reads from context rather than needing to be repeated per call.
+ * A turn with no text is not a gap to call out — the tool calls below (or
+ * the reasoning above) are the content, so nothing is printed in its place.
+ */
 function AssistantTurn({ node }: { node: AssistantTurnNode }) {
   return (
     <div className="turn turn--assistant">
-      <div className="kind">
-        Assistant · {formatCompact(node.billed)} tokens billed
-        {node.groupingInferred ? (
-          <span
-            className="inferred-badge"
-            title="This run predates assistant_message.toolUseIds. The calls below are grouped by their position in the log, not an explicit link."
-          >
-            ordering inferred
-          </span>
-        ) : null}
-      </div>
+      {/* Whether grouping was inferred is a property of the whole run, not of
+          each turn, so it is stated once above the transcript rather than
+          repeated on every card. */}
+      <div className="kind">{formatCompact(node.billed)} tokens</div>
       {node.thinking ? (
-        <details className="thinking-block">
+        <details className="thinking-block" open>
           <summary>Summarised reasoning</summary>
           <div className="body-text thinking-text">{node.thinking}</div>
         </details>
       ) : null}
-      <div className="body-text">{node.text || <em>(no text — tool calls only)</em>}</div>
+      {node.text ? <div className="body-text">{node.text}</div> : null}
       {node.items.length > 0 ? <div className="turn-items">{node.items.map((item, i) => renderNode(item, item.toolUseId ?? i))}</div> : null}
+    </div>
+  );
+}
+
+/** One or more turns that issued no tool call and left no text or reasoning — pure token spend, compacted to a single muted line rather than a card per turn. */
+function QuietStretch({ node }: { node: QuietStretchNode }) {
+  return (
+    <div className="quiet-stretch">
+      {node.turnCount === 1 ? '1 exchange' : `${node.turnCount} exchanges`} produced no output · {formatCompact(node.billed)} tokens
     </div>
   );
 }
@@ -118,6 +128,7 @@ const REGISTRY: RegistryEntry[] = [
   entry('harness-error', 'An uncaught error in the harness process itself.', (n): n is HarnessErrorNode => n.kind === 'harness_error', HarnessErrorEntry),
   entry('run-ended', 'The run_ended summary line.', (n): n is RunEndedNode => n.kind === 'run_ended', RunEndedEntry),
   entry('assistant-turn', 'One assistant turn: text, reasoning, and the calls it issued.', (n): n is AssistantTurnNode => n.kind === 'assistant_turn', AssistantTurn),
+  entry('quiet-stretch', 'One or more turns with no text, reasoning, or tool calls.', (n): n is QuietStretchNode => n.kind === 'quiet_stretch', QuietStretch),
   entry('unattributed', 'Calls/probes never claimed by a turn.', (n): n is UnattributedNode => n.kind === 'unattributed_activity', UnattributedActivity),
   // Fallback — must stay last. Matches any tool call not caught by a dedicated renderer above.
   entry('tool-generic', 'Any tool without a dedicated renderer above.', isToolCall, GenericToolCall),

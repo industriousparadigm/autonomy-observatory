@@ -15,10 +15,16 @@
 
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createInterface } from 'node:readline';
+import path from 'node:path';
 import type { RunEvent } from './events';
 
-export function eventLogPath(): string {
-  return process.env.EVENT_LOG_PATH ?? '/data/logs/a.jsonl';
+/** Where every arm's log lives, one file per arm. EVENT_LOG_PATH (a single fixed file) is obsolete now that the app is multi-arm — see lib/arms.ts for how arms are discovered under this. */
+export function logsDir(): string {
+  return process.env.LOGS_DIR ?? '/data/logs';
+}
+
+export function eventLogPath(arm: string): string {
+  return path.join(logsDir(), `${arm}.jsonl`);
 }
 
 export type ReduceResult<T> = {

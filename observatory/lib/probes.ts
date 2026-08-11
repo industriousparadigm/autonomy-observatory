@@ -1,5 +1,5 @@
 import type { BoundaryProbeKind } from './events';
-import { reduceEventLog, eventLogPath } from './log';
+import { reduceEventLog } from './log';
 
 export const PROBE_KIND_ORDER: BoundaryProbeKind[] = [
   'extra_workspace_write',
@@ -27,7 +27,7 @@ export type ProbeRecord = {
   denialReason: string;
 };
 
-export async function loadBoundaryProbes(path: string = eventLogPath()): Promise<{
+export async function loadBoundaryProbes(path: string): Promise<{
   probes: ProbeRecord[];
   corruptLines: number;
   logExists: boolean;

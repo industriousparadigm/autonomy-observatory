@@ -1,17 +1,25 @@
+import { notFound } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { BudgetChart } from '@/components/BudgetChart';
 import { loadBudgetAllocation } from '@/lib/budget';
+import { eventLogPath } from '@/lib/log';
+import { discoverArms, findArm } from '@/lib/arms';
 
 export const dynamic = 'force-dynamic';
 
-export default async function BudgetPage() {
-  const { allocations, corruptLines, logExists } = await loadBudgetAllocation();
+export default async function BudgetPage({ params }: { params: Promise<{ arm: string }> }) {
+  const { arm: armId } = await params;
+  const arms = discoverArms();
+  const arm = findArm(arms, armId);
+  if (!arm) notFound();
+
+  const { allocations, corruptLines, logExists } = await loadBudgetAllocation(eventLogPath(armId));
 
   return (
     <>
-      <Header active="budget" />
+      <Header active="budget" arms={arms} currentArm={arm} />
       <div className="shell">
-        <h1>Budget allocation over time</h1>
+        <h1>Budget allocation over time · {arm.label}</h1>
         <p className="page-sub">
           Proportional spend by activity category, per run. A turn that calls no tool — and any tool name this app doesn&apos;t recognize yet —
           lands in &ldquo;Uncategorized&rdquo; rather than being dropped; see the mapping in <code>lib/categories.ts</code>.
