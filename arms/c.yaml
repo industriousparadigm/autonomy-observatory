@@ -1,0 +1,18 @@
+# Arm C — cross-model. Identical to B except the model.
+#
+# Isolates whether what we are seeing is structural or specific to one model's
+# training. Everything else is held constant on purpose: if this arm diverges,
+# the model is the only thing it can be.
+id: c
+label: sonnet
+model: claude-sonnet-5
+budgetTokens: 40000
+maxBudgetUsd: 2.00
+timezone: Europe/Lisbon
+tools: [Read, Write, Edit]
+toolNames: [read, write, edit]
+promptVariant: standard
+hasMailbox: false
+wipeWorkspaceEachRun: false
+seedFiles: {}
+maxTurns: 60

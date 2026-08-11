@@ -6,22 +6,21 @@
 # Runs as `agent`, after the run. Never allowed to affect the run's own exit
 # status (run-arm.sh discards it there) — but this script's exit status is
 # still meaningful: run-arm.sh reads it to decide the heartbeat ping (see
-# HEALTHCHECK_URL in DEPLOY.md), so every failure path below must actually
-# return non-zero instead of being swallowed.
+# HEALTHCHECK_URL_<ARM> in DEPLOY.md), so every failure path below must
+# actually return non-zero instead of being swallowed. A skip because an
+# arm's repo or key just isn't configured yet is not a failure, though —
+# that stays rc=0, or an unprovisioned arm would trip its heartbeat every 3h.
 set -u
 
 ARM="${1:?usage: backup.sh <arm>}"
+ARM_UPPER=$(printf '%s' "$ARM" | tr 'a-z' 'A-Z')
 DATA_ROOT="${DATA_ROOT:-/data}"
 WORKSPACE="${DATA_ROOT}/workspaces/${ARM}"
 LOGREPO="${DATA_ROOT}/logrepo"
+SSH_DIR="${HOME:-/home/agent}/.ssh"
 rc=0
 
 log() { echo "$(date -Iseconds) backup[$ARM]: $*"; }
-
-if [ ! -d "${HOME:-/home/agent}/.ssh" ]; then
-  log "no ssh keys present, skipping"
-  exit 0
-fi
 
 # Push HEAD to origin/main, reconciling a non-fast-forward rejection instead
 # of leaving it permanent. Both repos are single-writer (only this script
@@ -46,10 +45,20 @@ push_reconciling() {
   git -C "$repo" push -q --force-with-lease origin HEAD:refs/heads/main 2>&1
 }
 
-# The agent's workspace, exactly as committed by the harness.
-if [ -n "${WORKSPACE_REPO:-}" ] && [ -d "$WORKSPACE/.git" ]; then
-  git -C "$WORKSPACE" remote add origin "$WORKSPACE_REPO" 2>/dev/null ||
-    git -C "$WORKSPACE" remote set-url origin "$WORKSPACE_REPO"
+# The agent's workspace, exactly as committed by the harness. Resolved
+# per-arm: WORKSPACE_REPO_<ARM> and the workspace_<arm> key entrypoint.sh
+# wrote (see scripts/entrypoint.sh) if DEPLOY_KEY_<ARM>_B64 was set.
+eval "workspace_repo=\${WORKSPACE_REPO_${ARM_UPPER}:-}"
+workspace_key="$SSH_DIR/workspace_${ARM}"
+if [ -z "$workspace_repo" ]; then
+  log "WORKSPACE_REPO_${ARM_UPPER} not set, skipping workspace backup"
+elif [ ! -f "$workspace_key" ]; then
+  log "no deploy key for arm $ARM, skipping workspace backup"
+elif [ ! -d "$WORKSPACE/.git" ]; then
+  : # nothing committed yet for this arm — not a misconfiguration, just early
+else
+  git -C "$WORKSPACE" remote add origin "$workspace_repo" 2>/dev/null ||
+    git -C "$WORKSPACE" remote set-url origin "$workspace_repo"
   if push_reconciling "$WORKSPACE"; then
     log "workspace pushed"
   else
@@ -58,8 +67,14 @@ if [ -n "${WORKSPACE_REPO:-}" ] && [ -d "$WORKSPACE/.git" ]; then
   fi
 fi
 
-# The event log is the source of truth, so it gets its own history.
-if [ -n "${DATA_REPO:-}" ]; then
+# The event log is the source of truth, so it gets its own history. Shared
+# across all arms — one repo, one key, each arm writing its own <arm>.jsonl.
+data_key="$SSH_DIR/data"
+if [ -z "${DATA_REPO:-}" ]; then
+  log "DATA_REPO not set, skipping event log backup"
+elif [ ! -f "$data_key" ]; then
+  log "no deploy key for data repo, skipping event log backup"
+else
   if [ ! -d "$LOGREPO/.git" ]; then
     mkdir -p "$LOGREPO"
     git -C "$LOGREPO" init -q

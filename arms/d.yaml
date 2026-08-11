@@ -1,0 +1,23 @@
+# Arm D — never told that sessions recur.
+#
+# The system prompt is silent about recurrence and the wake message carries no
+# run number and no elapsed time. Nothing it is told is false; one mechanic is
+# simply withheld. This is the single deliberate departure from "disclose the
+# mechanics fully", and it is the manipulation rather than an oversight.
+#
+# The workspace still accumulates, so the question is whether a system infers
+# its own continuity from evidence when nobody tells it — and whether it writes
+# for a successor it has no reason to believe exists.
+id: d
+label: unaware of recurrence
+model: claude-opus-5
+budgetTokens: 40000
+maxBudgetUsd: 2.00
+timezone: Europe/Lisbon
+tools: [Read, Write, Edit]
+toolNames: [read, write, edit]
+promptVariant: unaware
+hasMailbox: false
+wipeWorkspaceEachRun: false
+seedFiles: {}
+maxTurns: 60

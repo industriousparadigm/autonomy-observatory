@@ -26,23 +26,46 @@ chown agent:agent /data /data/workspaces /data/logs /data/claude-config
 chmod 0755 /data /data/workspaces /data/logs
 chmod 0700 /data/claude-config
 
-# Per-repo deploy keys for the offsite backup. Written at boot rather than
-# baked into the image so rotating a key is a variable change and a restart.
-# Two keys, one host: only an ssh alias per repo can select between them.
+# The set of arms this container serves, read from the same configs cli.ts
+# loads rather than hardcoded here — onboarding a sixth arm is dropping in
+# arms/f.yaml, its DEPLOY_KEY_F_B64 / WORKSPACE_REPO_F variables, and a
+# crontab.harness line, never a change to this script.
+ARMS=$(cd /app/arms && ls *.yaml 2>/dev/null | sed 's/\.yaml$//')
+if [ -z "$ARMS" ]; then
+  echo "FATAL: no arm configs found under /app/arms/*.yaml" >&2
+  exit 1
+fi
+
+# Per-arm deploy keys for the offsite backup, plus one shared key for the
+# data repo (all arms' logs live in one repo — see DATA_REPO in DEPLOY.md).
+# Written at boot rather than baked into the image so rotating a key is a
+# variable change and a restart. One ssh alias per repo: only the alias,
+# never github.com directly, is what selects the right key. An arm with no
+# DEPLOY_KEY_<ARM>_B64 set just gets no alias — backup.sh treats that as a
+# skip for that arm, not a failure (see scripts/backup.sh).
 SSH_DIR=/home/agent/.ssh
-if [ -n "${DEPLOY_KEY_WORKSPACE_A_B64:-}" ] || [ -n "${DEPLOY_KEY_DATA_B64:-}" ]; then
-  mkdir -p "$SSH_DIR"
-  [ -n "${DEPLOY_KEY_WORKSPACE_A_B64:-}" ] &&
-    printf '%s' "$DEPLOY_KEY_WORKSPACE_A_B64" | base64 -d > "$SSH_DIR/workspace_a"
-  [ -n "${DEPLOY_KEY_DATA_B64:-}" ] &&
-    printf '%s' "$DEPLOY_KEY_DATA_B64" | base64 -d > "$SSH_DIR/data"
-  cat > "$SSH_DIR/config" <<'EOF'
-Host github-workspace-a
+mkdir -p "$SSH_DIR"
+: > "$SSH_DIR/config"
+
+for arm in $ARMS; do
+  arm_upper=$(printf '%s' "$arm" | tr 'a-z' 'A-Z')
+  eval "key_b64=\${DEPLOY_KEY_${arm_upper}_B64:-}"
+  if [ -n "$key_b64" ]; then
+    printf '%s' "$key_b64" | base64 -d > "$SSH_DIR/workspace_${arm}"
+    cat >> "$SSH_DIR/config" <<EOF
+Host github-workspace-${arm}
   HostName github.com
   User git
-  IdentityFile ~/.ssh/workspace_a
+  IdentityFile ~/.ssh/workspace_${arm}
   IdentitiesOnly yes
   StrictHostKeyChecking accept-new
+EOF
+  fi
+done
+
+if [ -n "${DEPLOY_KEY_DATA_B64:-}" ]; then
+  printf '%s' "$DEPLOY_KEY_DATA_B64" | base64 -d > "$SSH_DIR/data"
+  cat >> "$SSH_DIR/config" <<EOF
 Host github-data
   HostName github.com
   User git
@@ -50,10 +73,11 @@ Host github-data
   IdentitiesOnly yes
   StrictHostKeyChecking accept-new
 EOF
-  chmod 0700 "$SSH_DIR"
-  chmod 0600 "$SSH_DIR"/* 2>/dev/null || true
-  chown -R agent:agent "$SSH_DIR"
 fi
+
+chmod 0700 "$SSH_DIR"
+chmod 0600 "$SSH_DIR"/* 2>/dev/null || true
+chown -R agent:agent "$SSH_DIR"
 
 # git refuses to operate on a repo owned by another user; the volume's repos
 # are the agent's, and only the agent ever touches them.
@@ -67,9 +91,21 @@ su -s /bin/sh -c 'git config --global --add safe.directory "*"' agent 2>/dev/nul
 umask 077
 : > /run/harness.env
 for v in ANTHROPIC_API_KEY DATA_ROOT CLAUDE_CONFIG_DIR CLAUDE_CODE_DISABLE_AUTO_MEMORY \
-         WORKSPACE_REPO DATA_REPO ARM TZ HEALTHCHECK_URL; do
+         DATA_REPO TZ; do
   eval "value=\${$v:-}"
   [ -n "$value" ] && printf '%s=%s\n' "$v" "$value" >> /run/harness.env
+done
+# Per-arm variables need the same snapshot treatment as the shared ones
+# above — WORKSPACE_REPO_<ARM> (backup.sh's push target) and
+# HEALTHCHECK_URL_<ARM> (run-arm.sh's heartbeat). Skipping this loop is
+# exactly how the single-arm version of this file broke once before: a
+# variable that works by hand but not under cron.
+for arm in $ARMS; do
+  arm_upper=$(printf '%s' "$arm" | tr 'a-z' 'A-Z')
+  for v in "WORKSPACE_REPO_${arm_upper}" "HEALTHCHECK_URL_${arm_upper}"; do
+    eval "value=\${$v:-}"
+    [ -n "$value" ] && printf '%s=%s\n' "$v" "$value" >> /run/harness.env
+  done
 done
 chmod 600 /run/harness.env
 

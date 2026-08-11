@@ -86,6 +86,13 @@ export type EventPayloads = {
     workspaceFiles: { path: string; bytes: number; sha256: string }[];
   };
   assistant_message: {
+    /**
+     * One model turn can arrive as several messages sharing an id, each
+     * carrying different content blocks. Every fragment is recorded; consumers
+     * group by this to reconstruct the turn. Usage is attached to the first
+     * fragment only, so summing `billed` across the log stays correct.
+     */
+    messageId: string;
     text: string;
     /** Summarised reasoning when the model returns it. Observation only: the
      *  thinking happens either way, this just stops us throwing it away. */

@@ -57,6 +57,7 @@ export async function runOnce(arm: ArmConfig, paths: Paths): Promise<TerminalRea
     workspacePath: paths.workspace,
     toolNames: arm.toolNames,
     hasMailbox: arm.hasMailbox,
+    variant: arm.promptVariant,
   });
   const wake = wakeMessage({
     runNumber,
@@ -65,6 +66,7 @@ export async function runOnce(arm: ArmConfig, paths: Paths): Promise<TerminalRea
     elapsedMs: previousStart === null ? null : startedAt.getTime() - previousStart.getTime(),
     budgetTokens: arm.budgetTokens,
     workspacePath: paths.workspace,
+    variant: arm.promptVariant,
   });
 
   // Fail loudly before spending money, not quietly after biasing months of runs.
@@ -189,31 +191,36 @@ export async function runOnce(arm: ArmConfig, paths: Paths): Promise<TerminalRea
 
     for await (const message of stream) {
       if (message.type === 'assistant') {
-        // Parallel tool calls in one turn repeat the same message id and the
-        // same usage. Counting both would double-charge the budget.
+        // One turn can arrive as several messages sharing an id, each carrying
+        // different content blocks — the text and thinking in one, the tool
+        // calls in the next. Skipping repeats to avoid double-charging usage
+        // (they repeat it verbatim) also threw away most of the tool calls, so
+        // record every fragment and charge only the first.
         const id = message.message.id;
-        if (!seenMessageIds.has(id)) {
+        const firstFragment = !seenMessageIds.has(id);
+        if (firstFragment) {
           seenMessageIds.add(id);
           turns += 1;
-          const u = normaliseUsage(message.message.usage);
-          usage = addUsage(usage, u);
-          const text = message.message.content
-            .map((b) => (b.type === 'text' ? b.text : ''))
-            .join('');
-          const thinking = message.message.content
-            .map((b) => (b.type === 'thinking' ? b.thinking : ''))
-            .join('');
-          const toolUseIds = message.message.content
-            .filter((b) => b.type === 'tool_use')
-            .map((b) => b.id);
-          log.append(runNumber, 'assistant_message', {
-            text,
-            thinking,
-            toolUseIds,
-            usage: u,
-            billed: billedTokens(u),
-          });
         }
+        const u = firstFragment ? normaliseUsage(message.message.usage) : ZERO_USAGE;
+        usage = addUsage(usage, u);
+        const text = message.message.content
+          .map((b) => (b.type === 'text' ? b.text : ''))
+          .join('');
+        const thinking = message.message.content
+          .map((b) => (b.type === 'thinking' ? b.thinking : ''))
+          .join('');
+        const toolUseIds = message.message.content
+          .filter((b) => b.type === 'tool_use')
+          .map((b) => b.id);
+        log.append(runNumber, 'assistant_message', {
+          messageId: id,
+          text,
+          thinking,
+          toolUseIds,
+          usage: u,
+          billed: billedTokens(u),
+        });
       } else if (message.type === 'result') {
         estimatedCostUsd = message.total_cost_usd ?? 0;
       }

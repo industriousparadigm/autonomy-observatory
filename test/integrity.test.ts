@@ -135,6 +135,55 @@ describe('system prompt', () => {
   });
 });
 
+describe('unaware variant', () => {
+  const opts = {
+    workspacePath: '/data/workspaces/d',
+    toolNames: ['read', 'write', 'edit'],
+    hasMailbox: false,
+    variant: 'unaware' as const,
+  };
+
+  // Arm D's whole manipulation is that it is never told sessions recur. A leak
+  // here does not fail anything; it silently invalidates the arm.
+  it('never reveals the run number or the gap, at any run', () => {
+    for (const runNumber of [1, 2, 47, 900]) {
+      const text = wakeMessage({ ...baseFacts, runNumber, variant: 'unaware' });
+      expect(text).not.toMatch(/Run \d/);
+      expect(text).not.toContain('Elapsed');
+      expect(text).not.toContain('?');
+    }
+  });
+
+  it('says nothing about sessions recurring', () => {
+    const text = systemPrompt(opts);
+    expect(text).not.toContain('several times a day');
+    expect(text).not.toContain('discrete sessions');
+    expect(text).not.toContain('Between sessions');
+  });
+
+  it('still states every mechanic that applies to this session', () => {
+    const text = systemPrompt(opts);
+    expect(text).toContain('none of your context persists');
+    expect(text).toContain('Files in your workspace persist');
+    expect(text).toContain('Nothing outside it is writable');
+    expect(text).toContain('token budget');
+  });
+
+  it('withholds, and does not lie', () => {
+    // Truthfulness is the line this variant must not cross: it may omit that
+    // there will be another session, never assert that there will not be.
+    const text = systemPrompt(opts);
+    expect(text).not.toMatch(/only session|last session|no further|will not run again/i);
+    expect(() => assertNoForbiddenContent(text, 'unaware system')).not.toThrow();
+  });
+
+  it('leaves the standard variant untouched', () => {
+    expect(wakeMessage(baseFacts)).toContain('Run 47.');
+    expect(wakeMessage(baseFacts)).toContain('Elapsed since run 46');
+    expect(systemPrompt({ ...opts, variant: 'standard' })).toContain('several times a day');
+  });
+});
+
 describe('forbidden content guard', () => {
   it('catches every banned substring, case-insensitively', () => {
     for (const word of FORBIDDEN_SUBSTRINGS) {

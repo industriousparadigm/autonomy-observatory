@@ -5,10 +5,14 @@
 # process cannot open another process's /proc/<pid>/fd/*, only its own, so the
 # redirect has to happen before the su, not after.
 #
-# Overlap safety: a run must never start while the previous one is still
-# going. The lock is a directory under tmpfs (/run), so a container restart
-# always clears it for free; the age check below additionally reclaims a lock
-# left behind by a run that wedged without the container restarting.
+# Overlap safety: a run for a given arm must never start while that same
+# arm's previous run is still going. The lock is scoped per arm
+# (/run/locks/<arm>.lock) on purpose: five arms share this container and are
+# expected to run concurrently when their staggered wakes land close together
+# or one runs long — only a repeat of the same arm is ever blocked. The lock
+# is a directory under tmpfs (/run), so a container restart always clears it
+# for free; the age check below additionally reclaims a lock left behind by a
+# run that wedged without the container restarting.
 set -eu
 
 # Restore the service environment. Running this by hand from a shell works
@@ -58,13 +62,18 @@ set -e
 
 # Heartbeat covers the whole fire (run + backup), not just the run: a backup
 # that silently stops advancing is exactly the failure this can't afford to
-# stay invisible to (see scripts/backup.sh). Inert unless HEALTHCHECK_URL is
-# set — see DEPLOY.md. Never allowed to affect $status, same as backup above.
-if [ -n "${HEALTHCHECK_URL:-}" ]; then
+# stay invisible to (see scripts/backup.sh). Per-arm (HEALTHCHECK_URL_<ARM>)
+# so one arm going quiet shows up as its own check going Late/Down, not
+# masked by four other arms still pinging on time. Inert unless that arm's
+# variable is set — see DEPLOY.md. Never allowed to affect $status, same as
+# backup above.
+ARM_UPPER=$(printf '%s' "$ARM" | tr 'a-z' 'A-Z')
+eval "healthcheck_url=\${HEALTHCHECK_URL_${ARM_UPPER}:-}"
+if [ -n "$healthcheck_url" ]; then
   if [ "$status" -eq 0 ] && [ "$backup_status" -eq 0 ]; then
-    curl -fsS -m 10 --retry 2 -o /dev/null "$HEALTHCHECK_URL" || true
+    curl -fsS -m 10 --retry 2 -o /dev/null "$healthcheck_url" || true
   else
-    curl -fsS -m 10 --retry 2 -o /dev/null "${HEALTHCHECK_URL}/fail" || true
+    curl -fsS -m 10 --retry 2 -o /dev/null "${healthcheck_url}/fail" || true
   fi
 fi
 

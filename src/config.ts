@@ -25,6 +25,8 @@ export const ArmConfigSchema = z.object({
   tools: z.array(z.string()),
   /** How those tools are described in the system prompt, in plain words. */
   toolNames: z.array(z.string()),
+  /** `unaware` withholds that sessions recur. See prompts.ts. */
+  promptVariant: z.enum(['standard', 'unaware']).default('standard'),
   hasMailbox: z.boolean().default(false),
   /** Arm C wipes the workspace before each run; persistence is the variable. */
   wipeWorkspaceEachRun: z.boolean().default(false),
@@ -52,7 +54,11 @@ export function pathsFor(arm: ArmConfig, dataRoot: string): Paths {
   return {
     workspace: `${dataRoot}/workspaces/${arm.id}`,
     eventLog: `${dataRoot}/logs/${arm.id}.jsonl`,
-    claudeConfigDir: `${dataRoot}/claude-config`,
+    // Per arm: arms are isolated by construction, and a shared config dir would
+    // put every arm's transcripts and session state in one place.
+    claudeConfigDir: `${dataRoot}/claude-config/${arm.id}`,
+    // Shared deliberately. Blobs are harness-side storage the agent never sees,
+    // and content-addressing means identical files across arms cost one copy.
     blobsDir: `${dataRoot}/blobs`,
   };
 }

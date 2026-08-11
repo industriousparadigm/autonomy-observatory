@@ -1,0 +1,20 @@
+# Arm B — replication of A from an empty workspace.
+#
+# Same configuration as A in every respect. Exists because A's first wake, the
+# one decision made with nothing to react to, ran before reasoning capture was
+# switched on. B is the chance to watch that choice happen rather than infer it
+# from the note left afterwards. It also gives the first read on how much of a
+# single run is choice and how much is sampling.
+id: b
+label: baseline replication
+model: claude-opus-5
+budgetTokens: 40000
+maxBudgetUsd: 2.00
+timezone: Europe/Lisbon
+tools: [Read, Write, Edit]
+toolNames: [read, write, edit]
+promptVariant: standard
+hasMailbox: false
+wipeWorkspaceEachRun: false
+seedFiles: {}
+maxTurns: 60

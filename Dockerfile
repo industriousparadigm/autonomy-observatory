@@ -39,7 +39,7 @@ FROM node:22-bookworm-slim AS runtime
 # tzdata: DST-aware Europe/Lisbon wall-clock scheduling needs the real
 # zoneinfo database. Debian slim ships without it — TZ alone resolves to
 # nothing without /usr/share/zoneinfo present.
-# curl: the optional HEALTHCHECK_URL heartbeat in run-arm.sh.
+# curl: the optional per-arm HEALTHCHECK_URL_<ARM> heartbeat in run-arm.sh.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       git \
       openssh-client \

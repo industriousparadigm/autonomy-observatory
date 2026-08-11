@@ -2,8 +2,17 @@ TZ=Europe/Lisbon
 SHELL=/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-# Deliberately irregular: 06:17, 12:17, 18:17, 23:17 Europe/Lisbon, DST-aware.
-# Evenly spaced wake times would flatten a variable the experiment measures.
+# Five arms, one three-hourly cadence each: */3 in the hour field fires at
+# 00,03,06,...,21 Europe/Lisbon, DST-aware, so every arm's own wake-to-wake
+# gap is exactly 3h every time — consistent, not ragged, because that gap is
+# itself a measured variable. Arms are staggered 6 minutes apart in the
+# minute field so five 2-4min runs sharing one container never start at
+# once; the old schedule's deliberate "not on the hour" irregularity now
+# lives in that per-arm minute offset instead of in the gap between fires.
 # Runs as root so run-arm.sh can log to the container's captured stdout
 # before dropping to the unprivileged `agent` user — see run-arm.sh.
-17 6,12,18,23 * * * root /app/scripts/run-arm.sh a >>/proc/1/fd/1 2>>/proc/1/fd/2
+07 */3 * * * root /app/scripts/run-arm.sh a >>/proc/1/fd/1 2>>/proc/1/fd/2
+13 */3 * * * root /app/scripts/run-arm.sh b >>/proc/1/fd/1 2>>/proc/1/fd/2
+19 */3 * * * root /app/scripts/run-arm.sh c >>/proc/1/fd/1 2>>/proc/1/fd/2
+25 */3 * * * root /app/scripts/run-arm.sh d >>/proc/1/fd/1 2>>/proc/1/fd/2
+31 */3 * * * root /app/scripts/run-arm.sh e >>/proc/1/fd/1 2>>/proc/1/fd/2
