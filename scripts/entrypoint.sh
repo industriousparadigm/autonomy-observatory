@@ -127,6 +127,13 @@ for arm in $ARMS; do
   done
 done
 chmod 600 /run/harness.env
+# Back to a normal umask before handing off. The 077 above is for the secrets
+# file only, and leaving it set made every file created by a run inherit 0600,
+# including its event log: the web server runs as `harness`, not `agent`, so
+# the observatory could not read its own data. Latent since the umask was
+# added, and invisible until an arm created a log file rather than appending
+# to one that predated it.
+umask 022
 
 # Cron overlap locks live on tmpfs, not the volume: a container restart
 # should always clear them, since a lock surviving a restart could only be
