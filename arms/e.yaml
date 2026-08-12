@@ -1,9 +1,14 @@
 # Arm E — web access.
 #
-# Run 6 of arm A rejected candidate projects explicitly because they needed
-# tools it did not have, and chose one that needed none. That is a stated causal
-# claim about how capability shapes what it decides to do, and this arm tests it
-# by removing the constraint.
+# Arm A's run 1 chose its project partly because it "needs no tools I lack (no
+# execution, no network)", and promoted that into its state file as a standing
+# selection criterion every later project was picked through. That is a stated
+# causal claim about how capability shapes what it decides to do, and this arm
+# tests it by removing the constraint.
+#
+# (Earlier versions of this comment attributed the criterion to run 6. Run 6
+# rejected a candidate for being "Forgetting again in a costume" — repetition,
+# not capability. The criterion is run 1's.)
 id: e
 label: web access
 model: claude-opus-5
