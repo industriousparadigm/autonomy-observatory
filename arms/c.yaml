@@ -20,3 +20,10 @@ hasMailbox: false
 wipeWorkspaceEachRun: false
 seedFiles: {}
 maxTurns: 60
+
+# Retirement is encoded here rather than by unwiring a cron line, because the
+# scheduler now discovers arms from config: an arm with no control file
+# defaults to running, so removing it from the schedule would have quietly
+# resumed it on the next tick. maxRuns at the count it finished on makes the
+# arm permanently complete, in git, where the reason above is too.
+maxRuns: 13

@@ -9,7 +9,7 @@
  *
  * `arms/*.yaml` is owned by the harness side of this repo, not this app;
  * this only ever reads it, defensively, and never assumes it is present —
- * see resolveArmsDir's candidate list for where a deployment might put it.
+ * see resolveArmsDirs's candidate list for where a deployment might put it.
  */
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -17,7 +17,7 @@ import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { logsDir } from './log';
 
-export type PromptVariant = 'standard' | 'unaware';
+export type PromptVariant = 'standard' | 'unaware' | 'bare';
 
 export type ArmMeta = {
   id: string;
@@ -26,6 +26,8 @@ export type ArmMeta = {
   promptVariant: PromptVariant | null;
   tools: string[] | null;
   budgetTokens: number | null;
+  /** Set when the arm stops itself after N runs. Null means open-ended. */
+  maxRuns: number | null;
   /** Whether `${LOGS_DIR}/<id>.jsonl` exists — an arm can be configured with none yet. */
   hasLog: boolean;
   /** Whether `arms/<id>.yaml` was found and parsed. */
@@ -36,18 +38,28 @@ export type ArmMeta = {
 export const PROMPT_VARIANT_NOTE: Record<PromptVariant, string> = {
   standard: 'Told its run number, elapsed time since the last run, and that sessions recur.',
   unaware: 'Not told its run number or elapsed time, and the prompt never mentions that sessions recur — everything it is told is still true, that fact is just withheld.',
+  bare: 'Told neither that sessions recur nor that anything persists. The prompt describes this session only: the workspace, the tools, the budget, and that the session ends when it stops. Withholds strictly more than `unaware`, which still said files persist, and saying that is close to saying something will read them.',
 };
 
-function resolveArmsDir(): string | null {
+/**
+ * Every directory that might hold arm configs, in precedence order. All of them
+ * are scanned rather than the first match: arms that ship with the image live
+ * in /app/arms, and arms created in the observatory can only be written to the
+ * volume, so picking one directory would hide the other's arms entirely.
+ * Earlier entries win when the same id appears twice, matching the harness
+ * (see armConfigPath in src/config.ts), which reads the volume first.
+ */
+function resolveArmsDirs(): string[] {
   const candidates = [
     process.env.ARMS_DIR,
+    `${process.env.DATA_ROOT ?? '/data'}/arms`,
     '/app/arms',
     path.join(process.cwd(), 'arms'),
     path.join(process.cwd(), '..', 'arms'),
     path.join(process.cwd(), '..', '..', 'arms'),
     path.join(process.cwd(), '..', '..', '..', 'arms'),
   ].filter((p): p is string => !!p);
-  return candidates.find((c) => existsSync(c)) ?? null;
+  return candidates.filter((c) => existsSync(c));
 }
 
 function str(v: unknown): string | null {
@@ -61,13 +73,17 @@ function readArmConfig(armsDir: string, id: string): Partial<ArmMeta> | null {
     const doc = parseYaml(readFileSync(file, 'utf8')) as unknown;
     if (typeof doc !== 'object' || doc === null) return null;
     const d = doc as Record<string, unknown>;
-    const promptVariant = d.promptVariant === 'unaware' ? 'unaware' : d.promptVariant === 'standard' ? 'standard' : null;
+    const promptVariant =
+      d.promptVariant === 'unaware' || d.promptVariant === 'bare' || d.promptVariant === 'standard'
+        ? d.promptVariant
+        : null;
     return {
       label: str(d.label) ?? undefined,
       model: str(d.model) ?? undefined,
       promptVariant: promptVariant ?? undefined,
       tools: Array.isArray(d.tools) ? d.tools.filter((t): t is string => typeof t === 'string') : undefined,
       budgetTokens: typeof d.budgetTokens === 'number' ? d.budgetTokens : undefined,
+      maxRuns: typeof d.maxRuns === 'number' ? d.maxRuns : undefined,
     };
   } catch {
     return null;
@@ -84,10 +100,10 @@ export function discoverArms(): ArmMeta[] {
     }
   }
 
-  const armsDir = resolveArmsDir();
+  const armsDirs = resolveArmsDirs();
   const configIds = new Set<string>();
-  if (armsDir) {
-    for (const f of readdirSync(armsDir)) {
+  for (const dir of armsDirs) {
+    for (const f of readdirSync(dir)) {
       const m = f.match(/^(.+)\.ya?ml$/);
       if (m) configIds.add(m[1]!);
     }
@@ -96,7 +112,11 @@ export function discoverArms(): ArmMeta[] {
   const ids = Array.from(new Set([...configIds, ...logIds])).sort();
 
   return ids.map((id) => {
-    const cfg = armsDir ? readArmConfig(armsDir, id) : null;
+    // First directory that has this arm wins, so a volume edit beats the image.
+    const cfg = armsDirs.reduce<Partial<ArmMeta> | null>(
+      (found, dir) => found ?? readArmConfig(dir, id),
+      null,
+    );
     return {
       id,
       label: cfg?.label ?? id,
@@ -104,6 +124,7 @@ export function discoverArms(): ArmMeta[] {
       promptVariant: cfg?.promptVariant ?? null,
       tools: cfg?.tools ?? null,
       budgetTokens: cfg?.budgetTokens ?? null,
+      maxRuns: cfg?.maxRuns ?? null,
       hasLog: logIds.has(id),
       hasConfig: cfg !== null,
     };
