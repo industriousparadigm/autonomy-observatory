@@ -26,6 +26,16 @@ chown agent:agent /data /data/workspaces /data/logs /data/claude-config
 chmod 0755 /data /data/workspaces /data/logs
 chmod 0700 /data/claude-config
 
+# The control plane, owned by the web server because that is the only process
+# that writes it: pause flags, cadence, queued one-off runs, and any arm config
+# authored in the observatory. The scheduler and the agent only read it, and
+# both run as other users, so these stay world-readable. Nothing here is inside
+# any workspace, so no agent can see it — the boundary check already refuses
+# every path outside /data/workspaces/<its own arm>.
+mkdir -p /data/control/arms /data/control/queue /data/arms
+chown -R harness:harness /data/control /data/arms
+chmod 0755 /data/control /data/control/arms /data/control/queue /data/arms
+
 # The set of arms this container serves, read from the same configs cli.ts
 # loads rather than hardcoded here — onboarding a sixth arm is dropping in
 # arms/f.yaml, its DEPLOY_KEY_F_B64 / WORKSPACE_REPO_F variables, and a

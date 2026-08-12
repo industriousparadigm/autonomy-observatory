@@ -3,7 +3,7 @@
  * workspace, separate event log, separate config. Nothing is shared but the code.
  */
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { parse } from 'yaml';
 import { z } from 'zod';
 
@@ -48,6 +48,30 @@ export type ArmConfig = z.infer<typeof ArmConfigSchema>;
 
 export function loadArm(path: string): ArmConfig {
   return ArmConfigSchema.parse(parse(readFileSync(path, 'utf8')));
+}
+
+/**
+ * Where an arm's config lives. Arms authored in the observatory land on the
+ * volume, which is the only writable place; arms that ship with the image are
+ * in `arms/`. The volume is checked first so an arm can be edited without a
+ * rebuild — including the ones the image ships.
+ */
+export function armConfigPath(armId: string, dataRoot: string, imageArmsDir = 'arms'): string {
+  const onVolume = `${dataRoot}/arms/${armId}.yaml`;
+  return existsSync(onVolume) ? onVolume : `${imageArmsDir}/${armId}.yaml`;
+}
+
+/** Every arm this container knows about, from both sources, ids only. */
+export function discoverArmIds(dataRoot: string, imageArmsDir = 'arms'): string[] {
+  const ids = new Set<string>();
+  for (const dir of [imageArmsDir, `${dataRoot}/arms`]) {
+    if (!existsSync(dir)) continue;
+    for (const file of readdirSync(dir)) {
+      const m = file.match(/^(.+)\.ya?ml$/);
+      if (m?.[1]) ids.add(m[1]);
+    }
+  }
+  return [...ids].sort();
 }
 
 export type Paths = {

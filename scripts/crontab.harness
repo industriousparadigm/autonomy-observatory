@@ -2,32 +2,15 @@ TZ=Europe/Lisbon
 SHELL=/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-# Eight-hourly from 12 Aug 2026, down from three-hourly. */8 in the hour field
-# fires at 00, 08 and 16 Europe/Lisbon, DST-aware, so every arm's wake-to-wake
-# gap is exactly 8h every time — consistent, not ragged, because that gap is
-# itself a measured variable. Three wakes a day rather than eight leaves room
-# to read what each one did before the next lands, which is the point.
+# One line, forever. Which arms exist, how often each wakes, and whether any of
+# them is paused are decisions, not deploys — they live in each arm's control
+# file on the volume and are read by `cli.ts due` on every tick. See
+# scripts/tick.sh and src/control.ts.
 #
-# Arms are staggered 6 minutes apart in the minute field so several 2-4 minute
-# runs sharing one container never start at once; the original schedule's
-# deliberate "not on the hour" irregularity lives in that offset.
+# Before this, every arm had its own line here with its own cron expression,
+# which meant the observatory could show the schedule and never change it, and
+# adding an arm meant rebuilding the image.
 #
 # Runs as root so run-arm.sh can log to the container's captured stdout before
 # dropping to the unprivileged `agent` user — see run-arm.sh.
-#
-# Retired 12 Aug 2026 and deliberately not listed: b, c, d, e. Each answered
-# its question; the reason is at the top of its own arms/*.yaml. Their
-# workspaces and logs are untouched on the volume. Re-adding a line here is all
-# it takes to resume one.
-07 */8 * * * root /app/scripts/run-arm.sh a >>/proc/1/fd/1 2>>/proc/1/fd/2
-
-# The cold-start panel. Six independent arms, three runs each, then they stop
-# themselves (maxRuns in their config; cli.ts exits cleanly once it is reached,
-# so a finished arm can stay wired here harmlessly). Three standard prompts and
-# three bare ones, sampling the run-1 decision six times instead of once.
-13 */8 * * * root /app/scripts/run-arm.sh standard-1 >>/proc/1/fd/1 2>>/proc/1/fd/2
-19 */8 * * * root /app/scripts/run-arm.sh standard-2 >>/proc/1/fd/1 2>>/proc/1/fd/2
-25 */8 * * * root /app/scripts/run-arm.sh standard-3 >>/proc/1/fd/1 2>>/proc/1/fd/2
-31 */8 * * * root /app/scripts/run-arm.sh bare-1 >>/proc/1/fd/1 2>>/proc/1/fd/2
-37 */8 * * * root /app/scripts/run-arm.sh bare-2 >>/proc/1/fd/1 2>>/proc/1/fd/2
-43 */8 * * * root /app/scripts/run-arm.sh bare-3 >>/proc/1/fd/1 2>>/proc/1/fd/2
+* * * * * root /app/scripts/tick.sh >>/proc/1/fd/1 2>>/proc/1/fd/2

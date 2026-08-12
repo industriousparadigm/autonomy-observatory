@@ -89,11 +89,11 @@ COPY --from=observatory-build /app/observatory/.next/standalone ./observatory/.n
 COPY --from=observatory-build /app/observatory/public ./observatory/.next/standalone/public
 COPY --from=observatory-build /app/observatory/.next/static ./observatory/.next/standalone/.next/static
 
-COPY scripts/entrypoint.sh scripts/run-arm.sh scripts/backup.sh /app/scripts/
+COPY scripts/entrypoint.sh scripts/run-arm.sh scripts/backup.sh scripts/tick.sh /app/scripts/
 COPY scripts/supervisord.conf /etc/supervisor/conf.d/harness.conf
 COPY scripts/crontab.harness /etc/cron.d/harness
 
-RUN chmod 0755 /app/scripts/entrypoint.sh /app/scripts/run-arm.sh /app/scripts/backup.sh \
+RUN chmod 0755 /app/scripts/entrypoint.sh /app/scripts/run-arm.sh /app/scripts/backup.sh /app/scripts/tick.sh \
  && chmod 0644 /etc/cron.d/harness \
  && chmod -R a-w /app
 

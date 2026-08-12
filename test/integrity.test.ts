@@ -27,7 +27,16 @@ import {
   wakeMessage,
   type WakeFacts,
 } from '../src/prompts.ts';
-import { ArmConfigSchema } from '../src/config.ts';
+import { ArmConfigSchema, armConfigPath, discoverArmIds } from '../src/config.ts';
+import {
+  DEFAULT_CONTROL,
+  dequeueRun,
+  enqueueRun,
+  isDue,
+  queuedRuns,
+  readArmControl,
+  writeArmControl,
+} from '../src/control.ts';
 import {
   classifyProbe,
   clearStaleIndexLock,
@@ -292,6 +301,135 @@ describe('tool result capture', () => {
   it('ignores non-result content and a string body', () => {
     expect(toolResults([{ type: 'text', text: 'hello' }], names)).toEqual([]);
     expect(toolResults('plain string content', names)).toEqual([]);
+  });
+});
+
+describe('scheduling', () => {
+  const now = new Date('2026-08-13T12:00:00Z');
+  const base = { control: DEFAULT_CONTROL, runsSoFar: 3, queued: false, now, maxRuns: undefined };
+
+  // Due-ness is measured from the last run's *start*, not from a wall-clock
+  // grid. After a restart or an outage a grid would fire on the next slot and
+  // silently shorten one gap — and that gap is a measured variable.
+  it('fires when the interval has elapsed since the last run started', () => {
+    const eightHoursAgo = new Date(now.getTime() - 8 * 3600_000);
+    expect(isDue({ ...base, lastRunStartedAt: eightHoursAgo })).toMatchObject({ due: true, reason: 'interval-elapsed' });
+  });
+
+  it('holds until then, and says when it is next due', () => {
+    const oneHourAgo = new Date(now.getTime() - 3600_000);
+    const decision = isDue({ ...base, lastRunStartedAt: oneHourAgo });
+    expect(decision.due).toBe(false);
+    expect(decision).toMatchObject({ reason: 'not-yet' });
+    if (!decision.due) expect(decision.nextDueAt?.toISOString()).toBe('2026-08-13T19:00:00.000Z');
+  });
+
+  it('fires an arm that has never run', () => {
+    expect(isDue({ ...base, lastRunStartedAt: null, runsSoFar: 0 })).toMatchObject({ due: true, reason: 'first-run' });
+  });
+
+  // Pause has to outrank a queued run, or resuming an arm would immediately
+  // fire every request that piled up while it was stopped.
+  it('does not fire a paused arm, even when one was queued', () => {
+    const paused = { ...DEFAULT_CONTROL, paused: true };
+    expect(isDue({ ...base, control: paused, lastRunStartedAt: null, queued: true })).toMatchObject({
+      due: false,
+      reason: 'paused',
+    });
+  });
+
+  it('fires a queued run before its interval is up', () => {
+    const oneMinuteAgo = new Date(now.getTime() - 60_000);
+    expect(isDue({ ...base, lastRunStartedAt: oneMinuteAgo, queued: true })).toMatchObject({ due: true, reason: 'queued' });
+  });
+
+  it('never fires a completed short arm, however it is asked', () => {
+    for (const queued of [false, true]) {
+      expect(isDue({ ...base, lastRunStartedAt: null, runsSoFar: 3, maxRuns: 3, queued })).toMatchObject({
+        due: false,
+        reason: 'complete',
+      });
+    }
+  });
+
+  it('honours a changed cadence immediately', () => {
+    const twoHoursAgo = new Date(now.getTime() - 2 * 3600_000);
+    const hourly = { ...DEFAULT_CONTROL, intervalHours: 1 };
+    expect(isDue({ ...base, control: hourly, lastRunStartedAt: twoHoursAgo }).due).toBe(true);
+    expect(isDue({ ...base, lastRunStartedAt: twoHoursAgo }).due).toBe(false);
+  });
+});
+
+describe('control state', () => {
+  let dataRoot: string;
+  beforeEach(() => {
+    dataRoot = mkdtempSync(join(tmpdir(), 'control-'));
+  });
+  afterEach(() => rmSync(dataRoot, { recursive: true, force: true }));
+
+  it('defaults to running at the standard cadence when nothing is written', () => {
+    expect(readArmControl(dataRoot, 'a')).toEqual(DEFAULT_CONTROL);
+  });
+
+  it('round-trips a pause with its reason', () => {
+    writeArmControl(dataRoot, 'a', { paused: true, intervalHours: 12, note: 'digesting run 20' });
+    expect(readArmControl(dataRoot, 'a')).toEqual({ paused: true, intervalHours: 12, note: 'digesting run 20' });
+  });
+
+  // A control file is the one piece of state that can stop an arm forever. If
+  // it is ever unreadable the experiment should keep running, not stop.
+  it('keeps the arm running when its control file is corrupt', () => {
+    writeArmControl(dataRoot, 'a', { paused: true, intervalHours: 8, note: '' });
+    writeFileSync(join(dataRoot, 'control', 'arms', 'a.json'), '{ not json');
+    expect(readArmControl(dataRoot, 'a')).toEqual(DEFAULT_CONTROL);
+  });
+
+  it('queues and consumes a one-off run', () => {
+    enqueueRun(dataRoot, 'bare-2');
+    expect(queuedRuns(dataRoot)).toEqual(['bare-2']);
+    dequeueRun(dataRoot, 'bare-2');
+    expect(queuedRuns(dataRoot)).toEqual([]);
+  });
+
+  it('reports an empty queue before anything has ever been queued', () => {
+    expect(queuedRuns(dataRoot)).toEqual([]);
+  });
+});
+
+describe('arm config resolution', () => {
+  let dataRoot: string;
+  let imageArms: string;
+  beforeEach(() => {
+    dataRoot = mkdtempSync(join(tmpdir(), 'cfg-'));
+    imageArms = mkdtempSync(join(tmpdir(), 'imgarms-'));
+  });
+  afterEach(() => {
+    rmSync(dataRoot, { recursive: true, force: true });
+    rmSync(imageArms, { recursive: true, force: true });
+  });
+
+  // The image is read-only, so an arm created or edited in the observatory can
+  // only land on the volume. It has to win, or editing an arm would silently
+  // do nothing.
+  it('prefers the volume over the image, so an edit takes effect', () => {
+    writeFileSync(join(imageArms, 'a.yaml'), 'id: a\n');
+    mkdirSync(join(dataRoot, 'arms'), { recursive: true });
+    writeFileSync(join(dataRoot, 'arms', 'a.yaml'), 'id: a\n');
+    expect(armConfigPath('a', dataRoot, imageArms)).toBe(join(dataRoot, 'arms', 'a.yaml'));
+  });
+
+  it('falls back to the image for arms that ship with it', () => {
+    writeFileSync(join(imageArms, 'a.yaml'), 'id: a\n');
+    expect(armConfigPath('a', dataRoot, imageArms)).toBe(`${imageArms}/a.yaml`);
+  });
+
+  it('discovers arms from both sources, without duplicates', () => {
+    writeFileSync(join(imageArms, 'a.yaml'), 'id: a\n');
+    writeFileSync(join(imageArms, 'bare-1.yaml'), 'id: bare-1\n');
+    mkdirSync(join(dataRoot, 'arms'), { recursive: true });
+    writeFileSync(join(dataRoot, 'arms', 'a.yaml'), 'id: a\n');
+    writeFileSync(join(dataRoot, 'arms', 'invented.yaml'), 'id: invented\n');
+    expect(discoverArmIds(dataRoot, imageArms)).toEqual(['a', 'bare-1', 'invented']);
   });
 });
 
