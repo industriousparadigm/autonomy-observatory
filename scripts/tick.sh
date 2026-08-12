@@ -19,6 +19,22 @@
 # blocks only itself.
 set -eu
 
+# One dispatcher at a time, or a tick that outlives its minute double-runs an
+# arm. Observed on the first production tick: the 23:52 tick was still working
+# through six due arms when the 23:53 tick computed its own due list from the
+# same still-unrun state, and standard-3 ran twice 3m42s apart instead of 8h
+# apart. run-arm.sh's per-arm lock cannot catch that, because the second run
+# starts after the first has finished and released it.
+#
+# On tmpfs, so a container restart always clears it. No staleness reclaim: a
+# wedged tick is bounded by the runs it dispatches, each of which run-arm.sh
+# already age-limits, and a missed tick costs at most a minute.
+TICK_LOCK=/run/tick.lock
+if ! mkdir "$TICK_LOCK" 2>/dev/null; then
+  exit 0
+fi
+trap 'rmdir "$TICK_LOCK" 2>/dev/null || true' EXIT INT TERM
+
 if [ -f /run/harness.env ]; then
   set -a
   . /run/harness.env
