@@ -13,7 +13,7 @@
 set -u
 
 ARM="${1:?usage: backup.sh <arm>}"
-ARM_UPPER=$(printf '%s' "$ARM" | tr 'a-z' 'A-Z')
+ARM_UPPER=$(printf '%s' "$ARM" | tr 'a-z-' 'A-Z_')
 DATA_ROOT="${DATA_ROOT:-/data}"
 WORKSPACE="${DATA_ROOT}/workspaces/${ARM}"
 LOGREPO="${DATA_ROOT}/logrepo"

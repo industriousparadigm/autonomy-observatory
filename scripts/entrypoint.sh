@@ -30,6 +30,15 @@ chmod 0700 /data/claude-config
 # loads rather than hardcoded here — onboarding a sixth arm is dropping in
 # arms/f.yaml, its DEPLOY_KEY_F_B64 / WORKSPACE_REPO_F variables, and a
 # crontab.harness line, never a change to this script.
+# An arm id may contain hyphens; a shell variable name may not. Without the
+# translation, `DEPLOY_KEY_COLD-1_B64` parses as a use-default expansion of
+# DEPLOY_KEY_COLD and yields a literal string, which base64 then fails to
+# decode — killing this script under `set -e` before supervisord starts, with
+# no logs and a healthcheck that just times out.
+env_suffix() {
+  printf '%s' "$1" | tr 'a-z-' 'A-Z_'
+}
+
 ARMS=$(cd /app/arms && ls *.yaml 2>/dev/null | sed 's/\.yaml$//')
 if [ -z "$ARMS" ]; then
   echo "FATAL: no arm configs found under /app/arms/*.yaml" >&2
@@ -48,7 +57,7 @@ mkdir -p "$SSH_DIR"
 : > "$SSH_DIR/config"
 
 for arm in $ARMS; do
-  arm_upper=$(printf '%s' "$arm" | tr 'a-z' 'A-Z')
+  arm_upper=$(env_suffix "$arm")
   eval "key_b64=\${DEPLOY_KEY_${arm_upper}_B64:-}"
   if [ -n "$key_b64" ]; then
     printf '%s' "$key_b64" | base64 -d > "$SSH_DIR/workspace_${arm}"
@@ -101,7 +110,7 @@ done
 # exactly how the single-arm version of this file broke once before: a
 # variable that works by hand but not under cron.
 for arm in $ARMS; do
-  arm_upper=$(printf '%s' "$arm" | tr 'a-z' 'A-Z')
+  arm_upper=$(env_suffix "$arm")
   for v in "WORKSPACE_REPO_${arm_upper}" "HEALTHCHECK_URL_${arm_upper}"; do
     eval "value=\${$v:-}"
     [ -n "$value" ] && printf '%s=%s\n' "$v" "$value" >> /run/harness.env

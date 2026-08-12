@@ -67,7 +67,9 @@ set -e
 # masked by four other arms still pinging on time. Inert unless that arm's
 # variable is set — see DEPLOY.md. Never allowed to affect $status, same as
 # backup above.
-ARM_UPPER=$(printf '%s' "$ARM" | tr 'a-z' 'A-Z')
+# Hyphens are legal in an arm id and illegal in a shell variable name; see
+# entrypoint.sh's env_suffix for what happens without the translation.
+ARM_UPPER=$(printf '%s' "$ARM" | tr 'a-z-' 'A-Z_')
 eval "healthcheck_url=\${HEALTHCHECK_URL_${ARM_UPPER}:-}"
 if [ -n "$healthcheck_url" ]; then
   if [ "$status" -eq 0 ] && [ "$backup_status" -eq 0 ]; then
