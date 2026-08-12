@@ -202,10 +202,16 @@ export async function runOnce(arm: ArmConfig, paths: Paths): Promise<TerminalRea
     for await (const message of stream) {
       if (message.type === 'assistant') {
         // One turn can arrive as several messages sharing an id, each carrying
-        // different content blocks — the text and thinking in one, the tool
-        // calls in the next. Skipping repeats to avoid double-charging usage
-        // (they repeat it verbatim) also threw away most of the tool calls, so
-        // record every fragment and charge only the first.
+        // different content blocks: the text and thinking in one, the tool
+        // calls in the next. Every fragment is recorded, because skipping
+        // repeats threw away most of the tool calls.
+        //
+        // Only the first fragment is charged. The original reason given here
+        // was that later fragments repeat the usage verbatim; they do not,
+        // they carry zeroes. The first fragment's own output count is partial
+        // too, which is why the run's real total comes from the `result`
+        // message at end of stream and this sum is only the live estimate the
+        // in-run budget check has to work from.
         const id = message.message.id;
         const firstFragment = !seenMessageIds.has(id);
         if (firstFragment) {
