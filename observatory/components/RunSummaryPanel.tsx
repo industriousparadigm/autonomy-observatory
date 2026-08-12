@@ -1,5 +1,5 @@
 import { FilePathButton } from './FileModal';
-import { buildFilePreview } from '@/lib/markdown';
+import { buildFilePreview, renderMarkdown } from '@/lib/markdown';
 import { PROBE_KIND_LABEL } from '@/lib/probes';
 import type { RunSummary } from '@/lib/summary';
 
@@ -60,8 +60,12 @@ export function RunSummaryPanel({ summary }: { summary: RunSummary }) {
         <p className="files-preview">No reasoning or narration was recorded for this run — see the transcript below for the raw tool calls.</p>
       ) : (
         <ol className="reasoning-trail">
+          {/* Rendered, not raw. These steps are the model's own narration and
+              reasoning, and it writes markdown in both. */}
           {reasoningTrail.map((step) => (
-            <li key={step.seq}>{step.text}</li>
+            <li key={step.seq}>
+              <div className="markdown-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(step.text) }} />
+            </li>
           ))}
         </ol>
       )}

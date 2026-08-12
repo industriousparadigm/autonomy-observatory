@@ -31,6 +31,7 @@
 
 import type { ReactNode } from 'react';
 import { formatCompact } from '@/lib/format';
+import { renderMarkdown } from '@/lib/markdown';
 import type {
   AssistantTurnNode,
   BoundaryProbeNode,
@@ -71,10 +72,18 @@ function AssistantTurn({ node }: { node: AssistantTurnNode }) {
       {node.thinking ? (
         <details className="thinking-block" open>
           <summary>Summarised reasoning</summary>
-          <div className="body-text thinking-text">{node.thinking}</div>
+          <div
+            className="markdown-body thinking-text"
+            dangerouslySetInnerHTML={{ __html: renderMarkdown(node.thinking) }}
+          />
         </details>
       ) : null}
-      {node.text ? <div className="body-text">{node.text}</div> : null}
+      {/* The model writes markdown in both fields, so both are rendered as
+          markdown. Left raw, a reader sees the wire format: literal asterisks
+          around every emphasis and a leading hyphen on every list item. */}
+      {node.text ? (
+        <div className="markdown-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(node.text) }} />
+      ) : null}
       {node.items.length > 0 ? <div className="turn-items">{node.items.map((item, i) => renderNode(item, item.toolUseId ?? i))}</div> : null}
     </div>
   );

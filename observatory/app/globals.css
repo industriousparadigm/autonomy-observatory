@@ -522,11 +522,6 @@ summary {
   overflow-x: auto;
 }
 
-.turn .body-text {
-  white-space: pre-wrap;
-  font-size: 0.92rem;
-}
-
 .turn--boundary_probe {
   background: color-mix(in srgb, var(--critical) 9%, var(--paper));
   border-color: var(--critical);
@@ -1187,25 +1182,48 @@ dialog.file-modal::backdrop {
   border-left: 2px solid var(--border-strong);
   color: var(--text-soft);
   font-size: 0.88rem;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
+/* No pre-wrap here. The agent's text is markdown and is rendered as such, so
+   the source newlines are structure the parser has already consumed; keeping
+   them as literal whitespace double-spaced every list and heading. */
+.quote .markdown-body {
+  font-size: inherit;
+  color: inherit;
+}
+
+.quote .markdown-body > :first-child { margin-top: 0; }
+.quote .markdown-body > :last-child { margin-bottom: 0; }
+
+/* A block-level toggle rather than an inline one. Inline, it rendered inside
+   whatever word the old character-count cut had landed in. */
 .quote-more {
   border: none;
   background: none;
   padding: 0;
-  margin: 0;
-  display: inline;
+  margin: 0.5rem 0 0;
 }
 
-.quote-more summary {
-  display: inline;
+.quote-more > summary {
+  display: inline-block;
+  list-style: none;
+  cursor: pointer;
   font-size: 0.74rem;
   font-weight: 600;
   color: var(--accent);
-  padding: 0 0 0 0.4rem;
+  padding: 0.2rem 0;
 }
+
+.quote-more > summary::-webkit-details-marker { display: none; }
+.quote-more > summary::before { content: '▸ '; }
+.quote-more[open] > summary::before { content: '▾ '; }
+
+/* The label states which way the toggle goes, so it has to change when it is
+   open. Left alone it still read "show the rest" with the rest already shown. */
+.quote-more-label[data-state='open'] { display: none; }
+.quote-more[open] .quote-more-label[data-state='closed'] { display: none; }
+.quote-more[open] .quote-more-label[data-state='open'] { display: inline; }
 
 /* --- derived figures --- */
 .figure-grid {
@@ -1407,3 +1425,48 @@ dialog.file-modal::backdrop {
     background: color-mix(in srgb, var(--critical) 24%, transparent);
   }
 }
+
+/* --- agent-written markdown on the run page, and the raw payload beneath it --- */
+
+/* The narration and the reasoning are both markdown now, so they need the same
+   measure as the surrounding turn rather than markdown-body's own default. */
+.turn .markdown-body {
+  font-size: 0.92rem;
+}
+
+.turn .markdown-body > :first-child { margin-top: 0; }
+.turn .markdown-body > :last-child { margin-bottom: 0; }
+
+/* Reasoning reads as an aside, so the prose is italic. Code is not prose:
+   italicised monospace is close to unreadable and misrepresents a literal. */
+.thinking-text code,
+.thinking-text pre {
+  font-style: normal;
+}
+
+/* The raw event payload had no styling at all: a bare pre that ran off the
+   side of the card on any real tool input. Bounded, scrollable, and set back
+   from the prose so it reads as the receipt it is rather than as content. */
+.tool-raw pre {
+  margin: 0.35rem 0 0;
+  padding: 0.7rem 0.85rem;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.74rem;
+  line-height: 1.5;
+  color: var(--text-soft);
+  max-height: 22rem;
+  overflow: auto;
+  white-space: pre;
+  tab-size: 2;
+}
+
+/* Reasoning steps carry rendered markdown now, so the list item is a block
+   container rather than a line of text. */
+.reasoning-trail li > .markdown-body {
+  font-size: inherit;
+}
+
+.reasoning-trail li > .markdown-body > :first-child { margin-top: 0; }
+.reasoning-trail li > .markdown-body > :last-child { margin-bottom: 0; }
