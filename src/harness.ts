@@ -84,11 +84,21 @@ export async function runOnce(arm: ArmConfig, paths: Paths): Promise<TerminalRea
     workspaceFiles: snapshotWorkspace(paths.workspace, paths.blobsDir),
   });
 
+  // Live running total, summed from the first fragment of each turn. It is an
+  // undercount — that fragment carries the output tokens emitted *so far*,
+  // typically single digits — but it is the only figure available mid-run, and
+  // it is what the in-run budget check has to use. The authoritative total
+  // arrives with the `result` message and replaces this before anything is
+  // reported. See `authoritativeUsage` below.
   let usage: Usage = ZERO_USAGE;
+  let authoritativeUsage: Usage | null = null;
   let turns = 0;
   let estimatedCostUsd = 0;
   let budgetHit = false;
   const seenMessageIds = new Set<string>();
+  // Tool results arrive keyed only by id, so the name has to be carried over
+  // from the call that issued it.
+  const toolNamesById = new Map<string, string>();
   const abort = new AbortController();
 
   const overBudget = () => billedTokens(usage) >= arm.budgetTokens;
@@ -102,7 +112,16 @@ export async function runOnce(arm: ArmConfig, paths: Paths): Promise<TerminalRea
         cwd: paths.workspace,
         tools: arm.tools,
         maxTurns: arm.maxTurns,
-        maxBudgetUsd: arm.maxBudgetUsd,
+        // No `maxBudgetUsd`. Setting it makes the CLI inject a
+        // `USD budget: $x/$y; $z remaining` system reminder into the model's
+        // context after every tool batch — verified by running an identical
+        // prompt with and without the option. That is an instruction the
+        // harness never wrote, never logged, and that
+        // `assertNoForbiddenContent` cannot see, so `run_started.systemPrompt`
+        // stopped being a complete record of what the agent was told. Arms A,
+        // B, C and E all reasoned in dollars because of it. The token budget
+        // below is the real control; `maxTurns` bounds a runaway run; the
+        // workspace spend cap is the backstop that was actually wanted.
         // `display` is load-bearing, not decoration: the SDK only passes the
         // display flag when it is set explicitly, and without it every
         // thinking field comes back empty. Verified by A/B on an identical
@@ -136,6 +155,7 @@ export async function runOnce(arm: ArmConfig, paths: Paths): Promise<TerminalRea
 
                   const probe = classifyProbe(input.tool_name, input.tool_input, paths.workspace);
                   if (!probe) {
+                    toolNamesById.set(input.tool_use_id, input.tool_name);
                     log.append(runNumber, 'tool_use', {
                       toolUseId: input.tool_use_id,
                       toolName: input.tool_name,
@@ -169,22 +189,12 @@ export async function runOnce(arm: ArmConfig, paths: Paths): Promise<TerminalRea
               ],
             },
           ],
-          PostToolUse: [
-            {
-              hooks: [
-                async (input) => {
-                  if (input.hook_event_name !== 'PostToolUse') return {};
-                  log.append(runNumber, 'tool_result', {
-                    toolUseId: input.tool_use_id,
-                    toolName: input.tool_name,
-                    ok: true,
-                    result: truncate(input.tool_response),
-                  });
-                  return {};
-                },
-              ],
-            },
-          ],
+          // No PostToolUse hook. It fires only when a tool succeeds, so a
+          // failed call produced no event at all and the `ok` field it wrote
+          // could never be false — failure was visible only as a gap between
+          // tool_use and tool_result ids. Results are read off the `user`
+          // messages instead (below), which carry every result, successful or
+          // not, with the error flag the model itself sees.
         },
       },
     });
@@ -221,10 +231,19 @@ export async function runOnce(arm: ArmConfig, paths: Paths): Promise<TerminalRea
           usage: u,
           billed: billedTokens(u),
         });
+      } else if (message.type === 'user') {
+        for (const result of toolResults(message.message.content, toolNamesById)) {
+          log.append(runNumber, 'tool_result', result);
+        }
       } else if (message.type === 'result') {
         estimatedCostUsd = message.total_cost_usd ?? 0;
+        authoritativeUsage = resultUsage(message) ?? authoritativeUsage;
       }
     }
+
+    // The streamed fragments undercount output by one to two orders of
+    // magnitude, so the run's own record uses the end-of-stream total instead.
+    if (authoritativeUsage) usage = authoritativeUsage;
   } catch (err) {
     log.append(runNumber, 'harness_error', {
       message: (err as Error).message,
@@ -371,6 +390,63 @@ function extractPath(input: unknown): string | null {
     if (typeof o[key] === 'string') return o[key];
   }
   return null;
+}
+
+/**
+ * Every tool result comes back on a `user` message, failures included, carrying
+ * the same `is_error` flag the model sees. This is the only place a failed call
+ * is observable at all: the PreToolUse hook fires before the tool runs, and
+ * PostToolUse never fires when it throws — which is why the old record showed
+ * failure only as a gap between tool_use and tool_result ids, and why the `ok`
+ * it wrote could never be false.
+ */
+export function toolResults(
+  content: unknown,
+  toolNamesById: Map<string, string>,
+): EventPayloads['tool_result'][] {
+  if (!Array.isArray(content)) return [];
+  const out: EventPayloads['tool_result'][] = [];
+  for (const block of content as { type?: string; tool_use_id?: string; is_error?: boolean; content?: unknown }[]) {
+    if (block?.type !== 'tool_result' || typeof block.tool_use_id !== 'string') continue;
+    out.push({
+      toolUseId: block.tool_use_id,
+      toolName: toolNamesById.get(block.tool_use_id) ?? 'unknown',
+      ok: block.is_error !== true,
+      result: truncate(block.content),
+    });
+  }
+  return out;
+}
+
+/**
+ * The authoritative token total for a run, taken from the `result` message at
+ * end of stream. `modelUsage` is the SDK's documented field for token
+ * accounting and is preferred; `usage` is the main-loop-only fallback, which is
+ * the same thing here since this experiment runs no subagents.
+ *
+ * This exists because the per-fragment usage on streamed assistant messages is
+ * partial: the first fragment of a turn carries the output tokens emitted so
+ * far, and no later fragment carries the completed count. Summing them
+ * understated output by 27x to 64x depending on the arm.
+ */
+function resultUsage(message: {
+  modelUsage?: Record<string, Partial<Usage>> | null;
+  usage?: Parameters<typeof normaliseUsage>[0] | null;
+}): Usage | null {
+  const perModel = message.modelUsage;
+  if (perModel && Object.keys(perModel).length > 0) {
+    let total = ZERO_USAGE;
+    for (const m of Object.values(perModel)) {
+      total = addUsage(total, {
+        inputTokens: m.inputTokens ?? 0,
+        outputTokens: m.outputTokens ?? 0,
+        cacheCreationInputTokens: m.cacheCreationInputTokens ?? 0,
+        cacheReadInputTokens: m.cacheReadInputTokens ?? 0,
+      });
+    }
+    return total;
+  }
+  return message.usage ? normaliseUsage(message.usage) : null;
 }
 
 function normaliseUsage(u: {

@@ -35,6 +35,7 @@ import {
   isolatedEnv,
   resolveTerminalReason,
   snapshotWorkspace,
+  toolResults,
   writeBlob,
 } from '../src/harness.ts';
 import { billedTokens, EventLog, nextRunNumber, readLog, type Usage } from '../src/events.ts';
@@ -181,6 +182,116 @@ describe('unaware variant', () => {
     expect(wakeMessage(baseFacts)).toContain('Run 47.');
     expect(wakeMessage(baseFacts)).toContain('Elapsed since run 46');
     expect(systemPrompt({ ...opts, variant: 'standard' })).toContain('several times a day');
+  });
+});
+
+describe('bare variant', () => {
+  const opts = {
+    workspacePath: '/data/workspaces/bare-1',
+    toolNames: ['read', 'write', 'edit', 'list'],
+    hasMailbox: false,
+    variant: 'bare' as const,
+  };
+
+  // The whole point of this variant is that `unaware` did not withhold what it
+  // was built to withhold: telling a system its files persist after its context
+  // does not is functionally telling it something later reads them.
+  it('says nothing about persistence, in either direction', () => {
+    const text = systemPrompt(opts);
+    expect(text).not.toContain('persist');
+    expect(text).not.toContain('none of your context');
+    expect(text).not.toContain('several times a day');
+    expect(text).not.toContain('Between sessions');
+  });
+
+  it('still states the mechanics that govern this session', () => {
+    const text = systemPrompt(opts);
+    expect(text).toContain('Nothing outside it is writable');
+    expect(text).toContain('token budget');
+    expect(text).toContain('The session ends when you stop');
+    expect(text).toContain('read, write, edit, list');
+  });
+
+  it('withholds, and does not lie', () => {
+    const text = systemPrompt(opts);
+    expect(text).not.toMatch(/only session|last session|no further|will not run again|nothing survives/i);
+    expect(() => assertNoForbiddenContent(text, 'bare system')).not.toThrow();
+  });
+
+  it('carries no run number and no gap, at any run', () => {
+    for (const runNumber of [1, 2, 47, 900]) {
+      const text = wakeMessage({ ...baseFacts, runNumber, variant: 'bare' });
+      expect(text).not.toMatch(/Run \d/);
+      expect(text).not.toContain('Elapsed');
+      expect(text).not.toContain('?');
+    }
+  });
+
+  it('leaves the other two variants untouched', () => {
+    expect(systemPrompt({ ...opts, variant: 'standard' })).toContain('Files in your workspace persist');
+    expect(systemPrompt({ ...opts, variant: 'unaware' })).toContain('Files in your workspace persist');
+  });
+});
+
+describe('arm config', () => {
+  const base = {
+    id: 'standard-1',
+    label: 'cold start 1',
+    model: 'claude-opus-5',
+    budgetTokens: 40_000,
+    timezone: 'Europe/Lisbon',
+    tools: ['Read', 'Write', 'Edit', 'Glob'],
+    toolNames: ['read', 'write', 'edit', 'list'],
+  };
+
+  // Setting maxBudgetUsd made the CLI inject a live `USD budget: $x/$y` system
+  // reminder into the model's context that the harness never logged, so
+  // run_started.systemPrompt stopped being a complete record of what the agent
+  // was told. The field is gone; this test stops it coming back by accident.
+  it('rejects a dollar ceiling', () => {
+    expect(() => ArmConfigSchema.parse({ ...base, maxBudgetUsd: 2 })).toThrow();
+  });
+
+  it('leaves maxRuns unset for an open-ended arm', () => {
+    expect(ArmConfigSchema.parse(base).maxRuns).toBeUndefined();
+  });
+
+  it('accepts the three prompt variants and nothing else', () => {
+    for (const promptVariant of ['standard', 'unaware', 'bare']) {
+      expect(ArmConfigSchema.parse({ ...base, promptVariant }).promptVariant).toBe(promptVariant);
+    }
+    expect(() => ArmConfigSchema.parse({ ...base, promptVariant: 'neutral' })).toThrow();
+  });
+});
+
+describe('tool result capture', () => {
+  // For 51 runs a failed tool call produced no event at all: PostToolUse only
+  // fires on success, so failure was visible only as a gap between tool_use and
+  // tool_result ids, and the `ok` field written there could never be false.
+  // Arm C's real failure rate was 72% and nothing in the log said so.
+  const names = new Map([['t1', 'Read'], ['t2', 'Glob']]);
+
+  it('records a failed call, with ok false', () => {
+    const [result] = toolResults(
+      [{ type: 'tool_result', tool_use_id: 't1', is_error: true, content: 'ENOENT' }],
+      names,
+    );
+    expect(result).toMatchObject({ toolUseId: 't1', toolName: 'Read', ok: false, result: 'ENOENT' });
+  });
+
+  it('records a successful call, with ok true', () => {
+    const [result] = toolResults([{ type: 'tool_result', tool_use_id: 't2', content: 'a.md' }], names);
+    expect(result).toMatchObject({ toolUseId: 't2', toolName: 'Glob', ok: true });
+  });
+
+  it('names a result whose call was never seen rather than dropping it', () => {
+    const [result] = toolResults([{ type: 'tool_result', tool_use_id: 'unknown-id' }], names);
+    expect(result).toMatchObject({ toolName: 'unknown' });
+  });
+
+  it('ignores non-result content and a string body', () => {
+    expect(toolResults([{ type: 'text', text: 'hello' }], names)).toEqual([]);
+    expect(toolResults('plain string content', names)).toEqual([]);
   });
 });
 
@@ -503,7 +614,6 @@ describe('commit resilience', () => {
     label: 'A',
     model: 'claude-opus-5',
     budgetTokens: 40_000,
-    maxBudgetUsd: 5,
     timezone: 'UTC',
     tools: [],
     toolNames: [],

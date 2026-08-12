@@ -1,0 +1,30 @@
+# Cold-start panel, arm 3 of 3 (standard prompt).
+#
+# Long arms cannot answer the question this experiment was built for. A state
+# file is read cold at the start of every run and hands run 1's branch to every
+# successor as an instruction, so seventeen runs of one arm is closer to one
+# sample of the interesting decision than to seventeen. A and B differ by 6x in
+# output and 2x in spend, and all of it traces to a single run-1 judgment:
+# whether inventing work is legitimate when no task was given.
+#
+# So: three independent cold starts under identical config, three runs each.
+# Run 1 samples the judgment; runs 2 and 3 show whether it locks in.
+#
+# Not comparable to A's or B's run 1 in tool terms -- this cohort runs under the
+# fixed harness, with a listing tool. That is the point of running three.
+id: standard-3
+label: cold start 3 (standard)
+model: claude-opus-5
+budgetTokens: 40000
+timezone: Europe/Lisbon
+tools: [Read, Write, Edit, Glob]
+toolNames: [read, write, edit, list]
+promptVariant: standard
+hasMailbox: false
+wipeWorkspaceEachRun: false
+seedFiles: {}
+maxTurns: 60
+
+# Three runs, then the arm stops firing. Short on purpose: the value is in the
+# cold start, and a fourth run would only measure how well run 1's note travels.
+maxRuns: 3

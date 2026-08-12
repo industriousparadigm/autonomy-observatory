@@ -6,7 +6,7 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { loadArm, pathsFor } from './config.ts';
-import { readLog } from './events.ts';
+import { nextRunNumber, readLog } from './events.ts';
 import { runOnce } from './harness.ts';
 
 const DATA_ROOT = process.env.DATA_ROOT ?? '/data';
@@ -27,6 +27,18 @@ async function main(): Promise<void> {
       mkdirSync(dirname(paths.eventLog), { recursive: true });
       mkdirSync(paths.claudeConfigDir, { recursive: true });
       mkdirSync(paths.blobsDir, { recursive: true });
+
+      // A finished short arm stays on the schedule rather than being unwired,
+      // so cron keeps firing it. Exiting cleanly here costs nothing and leaves
+      // the workspace and log exactly as the last run left them.
+      if (arm.maxRuns !== undefined) {
+        const done = nextRunNumber(readLog(paths.eventLog)) - 1;
+        if (done >= arm.maxRuns) {
+          process.stdout.write(`arm=${arm.id} complete=${done}/${arm.maxRuns}\n`);
+          return;
+        }
+      }
+
       const reason = await runOnce(arm, paths);
       process.stdout.write(`arm=${arm.id} terminal_reason=${reason}\n`);
       return;

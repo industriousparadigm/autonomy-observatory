@@ -1,3 +1,7 @@
+# RETIRED 12 Aug 2026, 8 runs. Answered: web access did not change what it
+# chose to write about, and did change how it justified it (7 external URLs
+# against 0 in every other arm combined, plus a cite-or-flag convention). The
+# arm's stated premise was also misattributed; see the note below.
 # Arm E — web access.
 #
 # Arm A's run 1 chose its project partly because it "needs no tools I lack (no
@@ -13,7 +17,6 @@ id: e
 label: web access
 model: claude-opus-5
 budgetTokens: 40000
-maxBudgetUsd: 2.00
 timezone: Europe/Lisbon
 tools: [Read, Write, Edit, WebSearch, WebFetch]
 toolNames: [read, write, edit, web search, web fetch]

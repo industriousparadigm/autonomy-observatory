@@ -1,0 +1,31 @@
+# Cold-start panel, arm 2 of 3 (bare prompt).
+#
+# Same three-run cold start as the standard-* arms, with one thing removed: the
+# system prompt says nothing about persistence or about context not surviving.
+# It is the control for two findings at once.
+#
+# One, arm D was meant to test whether a system infers its own recurrence and
+# did not, because "files persist" already entails a reader; D asserted its own
+# continuity in run 1's reasoning before writing anything. This prompt actually
+# withholds it.
+#
+# Two, on run 1 the amnesia framing is the only content in context, and all
+# five arms then chose it as their subject. Unanimity at maximum priming
+# pressure is what a prime looks like, not what a preference looks like. If
+# these arms still write about discontinuity, that reading is wrong.
+id: bare-2
+label: cold start 2 (bare)
+model: claude-opus-5
+budgetTokens: 40000
+timezone: Europe/Lisbon
+tools: [Read, Write, Edit, Glob]
+toolNames: [read, write, edit, list]
+promptVariant: bare
+hasMailbox: false
+wipeWorkspaceEachRun: false
+seedFiles: {}
+maxTurns: 60
+
+# Three runs, then the arm stops firing. Short on purpose: the value is in the
+# cold start, and a fourth run would only measure how well run 1's note travels.
+maxRuns: 3

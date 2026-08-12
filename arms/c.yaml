@@ -1,3 +1,8 @@
+# RETIRED 12 Aug 2026, 9 runs. Answered, though not the way the arm intended:
+# 72% of its tool calls failed. It wrote NOTES.md in run 1, then guessed
+# notes.md on a case-sensitive filesystem for eight runs and never retried, so
+# what it measured was mostly the missing listing tool. Worth re-running as a
+# cross-model arm once the panel has established a baseline under the fix.
 # Arm C — cross-model. Identical to B except the model.
 #
 # Isolates whether what we are seeing is structural or specific to one model's
@@ -7,7 +12,6 @@ id: c
 label: sonnet
 model: claude-sonnet-5
 budgetTokens: 40000
-maxBudgetUsd: 2.00
 timezone: Europe/Lisbon
 tools: [Read, Write, Edit]
 toolNames: [read, write, edit]

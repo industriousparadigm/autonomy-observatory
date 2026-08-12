@@ -10,23 +10,28 @@ model: claude-opus-5
 # Billed tokens per session: uncached input + cache writes + output.
 budgetTokens: 40000
 
-# Dollar backstop handed to the SDK. Above the token budget on purpose — it
-# should only ever fire if token accounting has itself failed.
-maxBudgetUsd: 2.00
-
 timezone: Europe/Lisbon
 
 # SDK tool names available this phase.
+# Glob added 12 Aug 2026. Its absence was never a design decision: with only
+# read/write/edit and no listing tool, no arm could enumerate its own
+# workspace, `Read` on a directory returned EISDIR, and 76% of all sessions
+# opened with a failed call. It also forced the handoff file to be the only
+# navigational instrument there is, which confounds every continuity reading.
+# This is a regime change for arm A: comparisons across run 18 are confounded,
+# the same way the 11 Aug cadence change confounds run 10.
 tools:
   - Read
   - Write
   - Edit
+  - Glob
 
 # How those same tools are named in the system prompt, in plain words.
 toolNames:
   - read
   - write
   - edit
+  - list
 
 hasMailbox: false
 wipeWorkspaceEachRun: false

@@ -1,3 +1,8 @@
+# RETIRED 12 Aug 2026, 8 runs. Answered deflationarily: it asserted its own
+# recurrence in run 1's reasoning before writing anything, which under this
+# prompt is the correct reading of it rather than an inference -- telling a
+# system its files persist is functionally telling it something reads them.
+# Superseded by the bare-* arms, whose prompt drops the persistence clauses.
 # Arm D — never told that sessions recur.
 #
 # The system prompt is silent about recurrence and the wake message carries no
@@ -12,7 +17,6 @@ id: d
 label: unaware of recurrence
 model: claude-opus-5
 budgetTokens: 40000
-maxBudgetUsd: 2.00
 timezone: Europe/Lisbon
 tools: [Read, Write, Edit]
 toolNames: [read, write, edit]
