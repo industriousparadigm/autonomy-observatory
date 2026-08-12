@@ -1051,3 +1051,359 @@ dialog.file-modal::backdrop {
   font-size: 0.92rem;
   color: var(--text-soft);
 }
+
+/* --- digest: one card per wake, on the front page and per arm --- */
+.digest-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.digest-card {
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.95rem 1.15rem 1.1rem;
+}
+
+.digest-card--alert {
+  border-color: color-mix(in srgb, var(--critical) 45%, var(--border));
+}
+
+.digest-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.digest-head .run-link {
+  font-size: 1rem;
+}
+
+.digest-when {
+  font-size: 0.74rem;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+
+.count-note {
+  font-size: 0.74rem;
+  font-weight: 400;
+  color: var(--text-faint);
+  margin-left: 0.6rem;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.anomaly-list,
+.alert-list,
+.plain-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.anomaly-list {
+  margin-top: 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.anomaly-list li,
+.alert-list li {
+  display: flex;
+  gap: 0.55rem;
+  align-items: baseline;
+}
+
+.alert-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.88rem;
+  margin-bottom: 1.6rem;
+}
+
+.anomaly-mark {
+  flex: none;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 4px;
+  padding: 0.16em 0.45em;
+}
+
+.anomaly-mark--alert {
+  background: color-mix(in srgb, var(--critical) 16%, transparent);
+  color: var(--critical);
+}
+
+.anomaly-mark--note {
+  background: var(--code-bg);
+  color: var(--text-faint);
+}
+
+.digest-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.7rem 1.6rem;
+  margin: 0.9rem 0 0;
+}
+
+.digest-facts dt,
+.fact-label {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  display: block;
+}
+
+.digest-facts dd {
+  margin: 0.15rem 0 0;
+  font-size: 0.85rem;
+  color: var(--text-soft);
+  overflow-wrap: anywhere;
+}
+
+.digest-facts dd.mono {
+  font-size: 0.8rem;
+}
+
+.digest-said {
+  margin-top: 0.95rem;
+}
+
+/* --- quoted agent text --- */
+.quote {
+  margin: 0.35rem 0 0;
+  padding: 0.1rem 0 0.1rem 0.9rem;
+  border-left: 2px solid var(--border-strong);
+  color: var(--text-soft);
+  font-size: 0.88rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.quote-more {
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  display: inline;
+}
+
+.quote-more summary {
+  display: inline;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--accent);
+  padding: 0 0 0 0.4rem;
+}
+
+/* --- derived figures --- */
+.figure-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1.2rem 1.8rem;
+  margin-bottom: 1.2rem;
+}
+
+.figure .label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.figure .value {
+  font-size: 1.35rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+  margin: 0.15rem 0;
+}
+
+.figure--wide {
+  grid-column: span 2;
+}
+
+.figure .value--text {
+  font-size: 0.92rem;
+  font-weight: 500;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+.figure .sub {
+  font-size: 0.75rem;
+  color: var(--text-faint);
+}
+
+.derivation {
+  background: var(--code-bg);
+}
+
+.derivation summary {
+  font-size: 0.78rem;
+  color: var(--text-soft);
+}
+
+.derivation .page-sub {
+  margin: 0.2rem 0 0.9rem;
+  font-size: 0.84rem;
+}
+
+.derivation dl {
+  margin: 0 0 0.9rem;
+}
+
+.derivation dt {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-top: 0.8rem;
+}
+
+.derivation dd {
+  margin: 0.2rem 0 0;
+  font-size: 0.84rem;
+  color: var(--text-soft);
+}
+
+/* --- cold start panel --- */
+.cohort-list {
+  margin: 0 0 1.8rem;
+}
+
+.cohort-list dt {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-top: 0.9rem;
+}
+
+.cohort-list dd {
+  margin: 0.2rem 0 0;
+  font-size: 0.88rem;
+  color: var(--text-soft);
+}
+
+.cohort-list .mono {
+  color: var(--text);
+  font-size: 0.82rem;
+}
+
+.panel-question {
+  margin-top: 2.4rem;
+}
+
+.panel-question h3 {
+  margin-top: 0;
+}
+
+.panel-question .page-sub {
+  margin-bottom: 1rem;
+  font-size: 0.86rem;
+}
+
+.panel-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-row {
+  display: grid;
+  grid-template-columns: minmax(0, 9.5rem) minmax(0, 1fr);
+  gap: 0.5rem 1.3rem;
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.panel-row:last-child {
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-row-arm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.panel-row-arm .run-link {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.84rem;
+}
+
+.cohort-tag {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.panel-row-body {
+  font-size: 0.88rem;
+  min-width: 0;
+}
+
+.panel-row-body .quote {
+  margin-top: 0;
+}
+
+.panel-row-body .mono {
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.plain-list li {
+  margin: 0.2rem 0;
+  font-size: 0.85rem;
+}
+
+.prompt-block {
+  margin-bottom: 1.2rem;
+}
+
+.prompt-block-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7rem;
+  margin-bottom: 0.35rem;
+}
+
+.prompt-block-head .digest-when {
+  margin-left: 0;
+}
+
+@media (max-width: 640px) {
+  .panel-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .digest-when {
+    margin-left: 0;
+    width: 100%;
+  }
+}
+
+/* The alert mark is small, bold and red on paper; on the dark palette that red
+   sits too close to the background, so it is lifted toward the body text. */
+@media (prefers-color-scheme: dark) {
+  .anomaly-mark--alert {
+    color: color-mix(in srgb, var(--critical) 55%, var(--text));
+    background: color-mix(in srgb, var(--critical) 24%, transparent);
+  }
+}

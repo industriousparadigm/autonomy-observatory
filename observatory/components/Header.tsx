@@ -9,14 +9,15 @@ const TABS = [
   { key: 'setup', label: 'Setup & docs' },
 ] as const;
 
-type ActiveKey = (typeof TABS)[number]['key'] | 'run-detail' | 'compare';
+type ActiveKey = (typeof TABS)[number]['key'] | 'run-detail' | 'compare' | 'cold-start';
 
-/** Where a per-arm tab points for a given section — run-detail has no arm-scoped analog for a specific run number, so it falls back to that arm's timeline. */
+/** Where a per-arm tab points for a given section — run-detail and the cross-arm pages have no arm-scoped analog, so they fall back to that arm's timeline. */
 function armHref(armId: string, section: ActiveKey): string {
   switch (section) {
     case 'timeline':
     case 'run-detail':
     case 'compare':
+    case 'cold-start':
       return `/${armId}`;
     default:
       return `/${armId}/${section}`;
@@ -46,7 +47,10 @@ export function Header({
         </Link>
         <nav className="tabs">
           <Link href="/" className={active === 'compare' ? 'active' : ''}>
-            Compare arms
+            Digest
+          </Link>
+          <Link href="/cold-start" className={active === 'cold-start' ? 'active' : ''}>
+            Cold start
           </Link>
           {TABS.map((tab) => (
             <Link key={tab.key} href={tabTarget ? armHref(tabTarget, tab.key) : '/'} className={active === tab.key ? 'active' : ''}>

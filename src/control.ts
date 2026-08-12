@@ -14,6 +14,12 @@
  * There is deliberately no `lastFiredAt` file. When an arm last ran is already
  * recorded, in the only place that matters: its event log. A second copy would
  * be a second thing to keep true.
+ *
+ * The JSON and YAML file formats above are the contract with the observatory,
+ * not any shared code: the web app is a separate package built in its own stage
+ * and cannot import this file, so it writes the same formats from
+ * observatory/lib/control.ts. The two implementations must agree field for
+ * field. Change one, change the other.
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';

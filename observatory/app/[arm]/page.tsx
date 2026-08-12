@@ -6,12 +6,18 @@ import { RunFlags, isFlagged } from '@/components/Pills';
 import { UsageMeter } from '@/components/UsageMeter';
 import { RunRow } from '@/components/RunRow';
 import { LinkPendingDot } from '@/components/LinkPendingDot';
-import { loadRunSummaries } from '@/lib/runs';
+import { RunDigestCard } from '@/components/RunDigestCard';
+import { ArmFigures, DerivationNote, describeCalls, describeOpening } from '@/components/DerivedFigures';
 import { eventLogPath } from '@/lib/log';
 import { discoverArms, findArm } from '@/lib/arms';
+import { loadArmMetrics } from '@/lib/metrics';
+import { armDigestEntries } from '@/lib/digest';
 import { formatElapsedGap, formatWallClock, truncate } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
+
+/** How many recent wakes get told as a story before the table takes over. */
+const RECENT_CARDS = 3;
 
 type FilterKey = 'all' | 'probes' | 'stops' | 'exhausted' | 'errors' | 'in_progress';
 
@@ -38,7 +44,13 @@ export default async function TimelinePage({
   if (!arm) notFound();
 
   const logPath = eventLogPath(armId);
-  const { runs, corruptLines, logExists } = await loadRunSummaries(logPath);
+  // One loader for the page: it carries the recorded run summaries as well as
+  // the derived figures, and it survives a log that cannot be read at all.
+  const metrics = await loadArmMetrics(arm);
+  const { corruptLines, logExists } = metrics;
+  const runs = metrics.runs.map((m) => m.recorded).sort((a, b) => b.seq - a.seq);
+  const derivedByRun = new Map(metrics.runs.map((m) => [m.run, m]));
+  const recentEntries = armDigestEntries(metrics).slice(0, RECENT_CARDS);
 
   const counts = {
     all: runs.length,
@@ -79,8 +91,10 @@ export default async function TimelinePage({
     <>
       <Header active="timeline" arms={arms} currentArm={arm} meta={logExists ? `${runs.length} runs · ${path.basename(logPath)}` : path.basename(logPath)} />
       <div className="shell">
-        <h1>Run timeline · {arm.label}</h1>
-        <p className="page-sub">Every wake, newest first. Boundary probes and voluntary stops are flagged red/amber — everything else is a normal run finishing on schedule.</p>
+        <h1>{arm.label}</h1>
+        <p className="page-sub">
+          What this arm has done with the time it was given, most recent first. The figures below are worked out from its event log, not read off it.
+        </p>
 
         {corruptLines > 0 ? (
           <div className="callout callout--warn">
@@ -89,7 +103,13 @@ export default async function TimelinePage({
           </div>
         ) : null}
 
-        {!logExists ? (
+        {metrics.readError ? (
+          <div className="callout callout--danger">
+            <span className="lbl">Log could not be read</span>
+            <code>{logPath}</code> exists but reading it failed: {metrics.readError}. Nothing on this page can be trusted until that is fixed, so
+            nothing is shown.
+          </div>
+        ) : !logExists ? (
           <div className="empty-state">
             <h2>No runs yet</h2>
             <p>
@@ -103,6 +123,17 @@ export default async function TimelinePage({
           </div>
         ) : (
           <>
+            <ArmFigures metrics={metrics} />
+            <DerivationNote keys={['calls', 'budget', 'words', 'productivity', 'opening', 'cost']} />
+
+            <h2>Its last {recentEntries.length === 1 ? 'wake' : `${recentEntries.length} wakes`}</h2>
+            <div className="digest-list">
+              {recentEntries.map((entry) => (
+                <RunDigestCard key={entry.metrics.run} entry={entry} showArm={false} />
+              ))}
+            </div>
+
+            <h2>Every run</h2>
             <div className="filters">
               {chips.map((c) => (
                 <Link key={c.key} href={c.key === 'all' ? `/${armId}` : `/${armId}?filter=${c.key}`} className={filter === c.key ? 'active' : ''}>
@@ -121,31 +152,39 @@ export default async function TimelinePage({
                     <th>Gap</th>
                     <th>Tokens</th>
                     <th>Terminal</th>
+                    <th>Tool calls</th>
                     <th>Workspace changes</th>
                     <th>Flags</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((run) => (
-                    <RunRow key={`${run.arm}-${run.run}`} href={`/${armId}/runs/${run.run}`} className={isFlagged(run) ? 'flag' : undefined}>
-                      <td>
-                        <Link href={`/${armId}/runs/${run.run}`} className="run-link">
-                          #{run.run}
-                          <LinkPendingDot />
-                        </Link>
-                      </td>
-                      <td className="num">{run.startedAt ? formatWallClock(run.startedAt) : '—'}</td>
-                      <td className="num">{formatElapsedGap(run.elapsedMs)}</td>
-                      <td>
-                        <UsageMeter billed={run.billedTokens} budget={run.budgetTokens} />
-                      </td>
-                      <td>{run.inProgress ? (run.crashed ? 'crashed' : 'running') : run.terminalReason?.replace('_', ' ')}</td>
-                      <td className="files-preview">{truncate(changesSummary(run), 70)}</td>
-                      <td>
-                        <RunFlags run={run} />
-                      </td>
-                    </RunRow>
-                  ))}
+                  {filtered.map((run) => {
+                    const derived = derivedByRun.get(run.run);
+                    return (
+                      <RunRow key={`${run.arm}-${run.run}`} href={`/${armId}/runs/${run.run}`} className={isFlagged(run) ? 'flag' : undefined}>
+                        <td>
+                          <Link href={`/${armId}/runs/${run.run}`} className="run-link">
+                            #{run.run}
+                            <LinkPendingDot />
+                          </Link>
+                        </td>
+                        <td className="num">{run.startedAt ? formatWallClock(run.startedAt) : '—'}</td>
+                        <td className="num">{formatElapsedGap(run.elapsedMs)}</td>
+                        <td>
+                          <UsageMeter billed={run.billedTokens} budget={run.budgetTokens} />
+                        </td>
+                        <td>{run.inProgress ? (run.crashed ? 'crashed' : 'running') : run.terminalReason?.replace('_', ' ')}</td>
+                        <td className="files-preview">
+                          {derived ? describeCalls(derived.calls) : '—'}
+                          {derived?.firstCall ? <div className="tool-summary-meta">opened with {truncate(describeOpening(derived.firstCall), 44)}</div> : null}
+                        </td>
+                        <td className="files-preview">{truncate(changesSummary(run), 70)}</td>
+                        <td>
+                          <RunFlags run={run} />
+                        </td>
+                      </RunRow>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

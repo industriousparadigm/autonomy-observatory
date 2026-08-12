@@ -63,6 +63,12 @@ export function isolationLabel(arm: ArmMeta, baseline: ArmMeta | null): string {
   if (added.length > 0) diffs.push(`+${added.join(', ')}`);
   if (removed.length > 0) diffs.push(`-${removed.join(', ')}`);
 
+  // A three-run arm and an open-ended one answer different questions, so the
+  // horizon belongs in the diff even when nothing else about the arm changed.
+  if (arm.maxRuns !== baseline.maxRuns) {
+    diffs.push(arm.maxRuns === null ? 'runs: open-ended' : `stops after ${arm.maxRuns} runs`);
+  }
+
   return diffs.length > 0 ? diffs.join('; ') : 'identical config to baseline';
 }
 
