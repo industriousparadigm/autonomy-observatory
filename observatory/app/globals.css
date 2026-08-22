@@ -1470,3 +1470,48 @@ dialog.file-modal::backdrop {
 
 .reasoning-trail li > .markdown-body > :first-child { margin-top: 0; }
 .reasoning-trail li > .markdown-body > :last-child { margin-bottom: 0; }
+
+/* Mailbox thread. Direction is carried by which side the card is weighted to
+   and by its label, not by colour alone: the two "received" cases (a check
+   that found nothing, a check that found something) differ in text, and a
+   colour pair would imply a sentiment neither has. */
+.mail {
+  border-radius: 8px;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--border);
+  background: var(--paper);
+}
+
+.mail--sent {
+  border-color: var(--border-strong);
+  background: var(--accent-soft);
+  margin-right: 2.5rem;
+}
+
+.mail--inbound {
+  margin-left: 2.5rem;
+}
+
+.mail--received {
+  border-style: dashed;
+}
+
+.mail-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.4rem 1rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-bottom: 0.35rem;
+}
+
+.mail-who {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.mail-when {
+  color: var(--text-faint);
+}

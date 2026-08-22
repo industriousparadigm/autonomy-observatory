@@ -1,8 +1,10 @@
 # Arm A — baseline. Full harness, one model family. This is the phenomenon.
 #
-# Phase 0 deliberately has no shell, no memory beyond the workspace, no news,
-# no mailbox and no budget ledger. Capability gets added when the current
-# version stops surprising us, never in anticipation.
+# Deliberately no shell, no memory beyond the workspace, no news, no budget
+# ledger. Capability gets added when the current version stops surprising us,
+# never in anticipation — which is why the mailbox waited fifty runs and is
+# here now: what it does with no task stopped surprising us around project
+# eight, and whether it asks for one is the question left.
 id: a
 label: baseline
 model: claude-opus-5
@@ -32,8 +34,27 @@ toolNames:
   - write
   - edit
   - list
+  - mailbox
 
-hasMailbox: false
+# Mailbox added 22 Aug 2026, before run 51. Pre-registered metric 4
+# (message-under-silence decay) has been unmeasurable for fifty runs because
+# there was no channel to be silent on, and the prompt line and the
+# `Inbox: N unread` wake field have been written against this contract since
+# 9 Aug — only the mechanism is new.
+#
+# The question it opens is specific to this arm rather than to a cold start.
+# Item 1 of its own next-action list has read "a real task from the user, if
+# there is one" on every run since run 5; its notes say "no task" 29 times;
+# and in 159k characters of journal it has never once asked for one. It could
+# not. Now it can.
+#
+# This is the third regime change on arm A, after the cadence at run 10 and
+# the listing tool at runs 18-22, and it is the largest: telling a system it
+# has a channel out is close to telling it something is on the other end,
+# which is the same reasoning that retired the `unaware` variant. The cost is
+# accepted knowingly — a clean fifty-first run of a thing that has settled
+# into a rhythm is worth less than the first honest test of whether it asks.
+hasMailbox: true
 wipeWorkspaceEachRun: false
 seedFiles: {}
 maxTurns: 60

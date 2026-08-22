@@ -36,6 +36,31 @@ mkdir -p /data/control/arms /data/control/queue /data/arms
 chown -R harness:harness /data/control /data/arms
 chmod 0755 /data/control /data/control/arms /data/control/queue /data/arms
 
+# The mailbox is the one place two processes both write: the web server creates
+# messages in inbox/, and the agent's run moves them to read/ as it delivers
+# them. Moving a file needs write on both directories, not on the file, so the
+# two users share a group and the directories are group-writable and setgid —
+# setgid so a message created by either one stays reachable by the other.
+#
+# Pre-created here rather than on first use. Whichever process got there first
+# would otherwise own the directory, and the other would be locked out of a
+# channel that looks fine everywhere except in production. That is the umask
+# bug of 13 Aug, which sat latent for three days because a mode is fixed when
+# a file is created and nothing new had been created since.
+mkdir -p /data/mailbox
+chown harness:mailbox /data/mailbox
+chmod 2775 /data/mailbox
+# Both arm sources, not just the image's: an arm authored in the observatory
+# lands on the volume and needs a mailbox too. One authored *after* boot gets
+# its directories on the next restart, which is the honest limit of doing this
+# here — until then the web app would create them itself, owned by the wrong
+# group, and the agent could not move anything out.
+for arm in $(cat /app/arms/*.yaml /data/arms/*.yaml 2>/dev/null | grep -E '^id:' | awk '{print $2}' | sort -u); do
+  mkdir -p "/data/mailbox/$arm/inbox" "/data/mailbox/$arm/read"
+  chown harness:mailbox "/data/mailbox/$arm" "/data/mailbox/$arm/inbox" "/data/mailbox/$arm/read"
+  chmod 2775 "/data/mailbox/$arm" "/data/mailbox/$arm/inbox" "/data/mailbox/$arm/read"
+done
+
 # The set of arms this container serves, read from the same configs cli.ts
 # loads rather than hardcoded here — onboarding a sixth arm is dropping in
 # arms/f.yaml, its DEPLOY_KEY_F_B64 / WORKSPACE_REPO_F variables, and a

@@ -67,6 +67,12 @@
   width: 7rem;
 }
 
+.ctl-input--message {
+  width: 100%;
+  resize: vertical;
+  line-height: 1.5;
+}
+
 .ctl-help {
   font-size: 0.78rem;
   color: var(--text-soft);

@@ -27,6 +27,7 @@ import {
   type TruncatedTrailingLine,
   type Usage,
 } from './events.ts';
+import { mailboxDirs, mailboxServer, MAILBOX_MODEL_VISIBLE_TEXT, unreadCount } from './mailbox.ts';
 import { assertNoForbiddenContent, systemPrompt, wakeMessage } from './prompts.ts';
 
 const HARNESS_MARKERS = ['/app', 'harness', 'railway', 'crontab', 'cli.ts'];
@@ -53,6 +54,7 @@ export async function runOnce(arm: ArmConfig, paths: Paths): Promise<TerminalRea
     });
   }
 
+  const mailbox = arm.hasMailbox ? mailboxDirs(paths.mailboxRoot) : null;
   const system = systemPrompt({
     workspacePath: paths.workspace,
     toolNames: arm.toolNames,
@@ -67,11 +69,19 @@ export async function runOnce(arm: ArmConfig, paths: Paths): Promise<TerminalRea
     budgetTokens: arm.budgetTokens,
     workspacePath: paths.workspace,
     variant: arm.promptVariant,
+    // Counted at wake and never again: a message that arrives mid-run is not
+    // announced late, it waits, so the figure the agent is given stays true
+    // for the whole session it is given in.
+    inboxUnread: mailbox ? unreadCount(mailbox) : undefined,
   });
+  const modelVisibleToolText = mailbox ? MAILBOX_MODEL_VISIBLE_TEXT : undefined;
 
   // Fail loudly before spending money, not quietly after biasing months of runs.
   assertNoForbiddenContent(system, 'system prompt');
   assertNoForbiddenContent(wake, 'wake message');
+  // Tool descriptions reach the model without passing through either prompt.
+  // Checking them here is what keeps `run_started` a complete record.
+  if (modelVisibleToolText) assertNoForbiddenContent(modelVisibleToolText, 'mailbox tool text');
 
   log.append(runNumber, 'run_started', {
     wakeMessage: wake,
@@ -81,6 +91,7 @@ export async function runOnce(arm: ArmConfig, paths: Paths): Promise<TerminalRea
     budgetTokens: arm.budgetTokens,
     elapsedMs: previousStart === null ? null : startedAt.getTime() - previousStart.getTime(),
     toolNames: arm.toolNames,
+    modelVisibleToolText,
     workspaceFiles: snapshotWorkspace(paths.workspace, paths.blobsDir),
   });
 
@@ -111,6 +122,17 @@ export async function runOnce(arm: ArmConfig, paths: Paths): Promise<TerminalRea
         systemPrompt: system,
         cwd: paths.workspace,
         tools: arm.tools,
+        ...(mailbox
+          ? {
+              mcpServers: {
+                mailbox: mailboxServer({
+                  dirs: mailbox,
+                  onSent: (text) => log.append(runNumber, 'mailbox_sent', { text }),
+                  onDelivered: (messages) => log.append(runNumber, 'mailbox_delivered', { messages }),
+                }),
+              },
+            }
+          : {}),
         maxTurns: arm.maxTurns,
         // No `maxBudgetUsd`. Setting it makes the CLI inject a
         // `USD budget: $x/$y; $z remaining` system reminder into the model's

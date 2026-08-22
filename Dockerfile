@@ -73,8 +73,16 @@ ENV CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
 #          executes the LLM's tool calls, because the SDK runs tools in-process
 #          rather than in a separate sandboxed subprocess. See DEPLOY.md for
 #          exactly what this separation does and doesn't buy.
-RUN useradd --uid 10001 --create-home --home-dir /home/harness --shell /usr/sbin/nologin harness \
- && useradd --uid 10002 --create-home --home-dir /home/agent   --shell /usr/sbin/nologin agent
+# `mailbox` is the one group both users share, and it exists for exactly one
+# directory: the mailbox, where each process has to move files the other
+# created. Named `mailbox` rather than `mail` because Debian already ships a
+# `mail` group and quietly joining it would widen these two accounts by more
+# than this needs.
+RUN groupadd --gid 10003 mailbox \
+ && useradd --uid 10001 --create-home --home-dir /home/harness --shell /usr/sbin/nologin harness \
+ && useradd --uid 10002 --create-home --home-dir /home/agent   --shell /usr/sbin/nologin agent \
+ && usermod -aG mailbox harness \
+ && usermod -aG mailbox agent
 
 WORKDIR /app
 COPY package.json ./

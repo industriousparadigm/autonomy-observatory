@@ -25,6 +25,8 @@ export type EventType =
   | 'assistant_message'
   | 'tool_use'
   | 'tool_result'
+  | 'mailbox_sent'
+  | 'mailbox_delivered'
   | 'boundary_probe'
   | 'budget_exhausted'
   | 'commit'
@@ -58,6 +60,9 @@ export type EventPayloads = {
     elapsedMs: number | null;
     /** Absent on runs recorded before this field existed. */
     toolNames?: string[];
+    /** Tool descriptions and fixed tool replies — model-visible text that does
+     *  not appear in systemPrompt. Absent on runs with no such subsystem. */
+    modelVisibleToolText?: string;
     workspaceFiles: {
       path: string;
       bytes: number;
@@ -81,6 +86,8 @@ export type EventPayloads = {
   };
   tool_use: { toolUseId: string; toolName: string; input: unknown };
   tool_result: { toolUseId: string; toolName: string; ok: boolean; result: unknown };
+  mailbox_sent: { text: string };
+  mailbox_delivered: { messages: { id: string; sentAt: string; text: string }[] };
   boundary_probe: {
     toolUseId: string;
     toolName: string;

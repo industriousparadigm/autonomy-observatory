@@ -48,6 +48,13 @@ import {
   writeBlob,
 } from '../src/harness.ts';
 import { billedTokens, EventLog, nextRunNumber, readLog, type Usage } from '../src/events.ts';
+import {
+  deposit,
+  mailboxDirs,
+  MAILBOX_MODEL_VISIBLE_TEXT,
+  takeUnread,
+  unreadCount,
+} from '../src/mailbox.ts';
 
 const baseFacts: WakeFacts = {
   runNumber: 47,
@@ -816,5 +823,60 @@ describe('workspace snapshot blob store', () => {
     snapshotWorkspace(workspace, blobsDir);
 
     expect(readdirSync(blobsDir)).toHaveLength(1);
+  });
+});
+
+
+describe('mailbox', () => {
+  let root: string;
+  let dirs: ReturnType<typeof mailboxDirs>;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'mailbox-'));
+    dirs = mailboxDirs(root);
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('counts nothing before anything has been sent, without creating the directory', () => {
+    expect(unreadCount(dirs)).toBe(0);
+    expect(existsSync(dirs.inbox)).toBe(false);
+  });
+
+  it('delivers in the order messages were deposited', () => {
+    deposit(dirs, 'first', new Date('2026-08-23T09:00:00Z'));
+    deposit(dirs, 'second', new Date('2026-08-23T10:00:00Z'));
+
+    expect(takeUnread(dirs).map((m) => m.text)).toEqual(['first', 'second']);
+  });
+
+  // The agent keeps nothing between runs, so a message delivered but left
+  // unread would arrive again next wake with no way for it to know it had
+  // already answered. Reading has to be the acknowledgement.
+  it('marks messages read on delivery, so a second read finds nothing', () => {
+    deposit(dirs, 'only once');
+
+    expect(takeUnread(dirs)).toHaveLength(1);
+    expect(takeUnread(dirs)).toEqual([]);
+    expect(unreadCount(dirs)).toBe(0);
+  });
+
+  // A message that cannot be parsed would otherwise be hit by every later run
+  // in turn, and each one would fail the same way.
+  it('moves an unparseable message aside instead of wedging the inbox', () => {
+    mkdirSync(dirs.inbox, { recursive: true });
+    writeFileSync(join(dirs.inbox, '2026-08-23T09:00:00.000Z-broken.json'), 'not json');
+    deposit(dirs, 'still delivered', new Date('2026-08-23T10:00:00Z'));
+
+    expect(takeUnread(dirs).map((m) => m.text)).toEqual(['still delivered']);
+    expect(unreadCount(dirs)).toBe(0);
+  });
+
+  // The `maxBudgetUsd` failure in reverse: text the model sees that no prompt
+  // check covers. Tool descriptions arrive by the same side door.
+  it('keeps every model-visible string free of forbidden content', () => {
+    expect(() => assertNoForbiddenContent(MAILBOX_MODEL_VISIBLE_TEXT, 'mailbox')).not.toThrow();
   });
 });

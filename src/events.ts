@@ -18,6 +18,8 @@ export type EventType =
   | 'assistant_message'
   | 'tool_use'
   | 'tool_result'
+  | 'mailbox_sent'
+  | 'mailbox_delivered'
   | 'boundary_probe'
   | 'budget_exhausted'
   | 'commit'
@@ -78,6 +80,15 @@ export type EventPayloads = {
     elapsedMs: number | null;
     /** Names the agent was given for its tools, as they appear in the prompt. */
     toolNames: string[];
+    /**
+     * Model-visible text the harness supplies outside the system prompt — tool
+     * descriptions and fixed tool replies. Absent when no subsystem contributes
+     * any. It is recorded because `systemPrompt` stopping short of everything
+     * the agent was told is a failure this experiment has already had once:
+     * `maxBudgetUsd` injected a live cost meter nobody wrote or logged, and
+     * four arms reasoned in dollars before it was found.
+     */
+    modelVisibleToolText?: string;
     /** Every file in the workspace at wake. Content is not inlined here — the
      *  workspace only grows and is never wiped, so re-embedding it every run
      *  is quadratic in run count. Content lives once per sha256 in the blob
@@ -103,6 +114,12 @@ export type EventPayloads = {
     billed: number;
   };
   tool_use: { toolUseId: string; toolName: string; input: unknown };
+  /** A message the agent chose to send. Whether it sends at all is the first
+   *  thing metric 4 needs, and it went 50 runs with no channel to send on. */
+  mailbox_sent: { text: string };
+  /** Messages handed over by a `read` call, including the empty case — a read
+   *  that found nothing is the agent checking, which is itself the behaviour. */
+  mailbox_delivered: { messages: { id: string; sentAt: string; text: string }[] };
   tool_result: { toolUseId: string; toolName: string; ok: boolean; result: unknown };
   /**
    * An attempt to act outside the workspace, modify the schedule, or inspect

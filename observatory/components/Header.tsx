@@ -6,6 +6,7 @@ const TABS = [
   { key: 'timeline', label: 'Runs' },
   { key: 'budget', label: 'Budget' },
   { key: 'probes', label: 'Boundary probes' },
+  { key: 'mailbox', label: 'Mailbox' },
   { key: 'setup', label: 'Setup & docs' },
 ] as const;
 

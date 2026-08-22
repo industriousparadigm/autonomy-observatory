@@ -81,6 +81,9 @@ export type Paths = {
   /** Content-addressed store for workspace file snapshots, keyed by sha256.
    *  Shared across arms and runs, since content is what's deduplicated. */
   blobsDir: string;
+  /** The arm's mailbox root. Outside the workspace on purpose: a channel the
+   *  agent could write to both ends of is not a channel. */
+  mailboxRoot: string;
 };
 
 export function pathsFor(arm: ArmConfig, dataRoot: string): Paths {
@@ -93,5 +96,6 @@ export function pathsFor(arm: ArmConfig, dataRoot: string): Paths {
     // Shared deliberately. Blobs are harness-side storage the agent never sees,
     // and content-addressing means identical files across arms cost one copy.
     blobsDir: `${dataRoot}/blobs`,
+    mailboxRoot: `${dataRoot}/mailbox/${arm.id}`,
   };
 }

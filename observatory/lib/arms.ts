@@ -28,6 +28,8 @@ export type ArmMeta = {
   budgetTokens: number | null;
   /** Set when the arm stops itself after N runs. Null means open-ended. */
   maxRuns: number | null;
+  /** Whether it has a channel out of the workspace, and is told so. */
+  hasMailbox: boolean;
   /** Whether `${LOGS_DIR}/<id>.jsonl` exists — an arm can be configured with none yet. */
   hasLog: boolean;
   /** Whether `arms/<id>.yaml` was found and parsed. */
@@ -84,6 +86,7 @@ function readArmConfig(armsDir: string, id: string): Partial<ArmMeta> | null {
       tools: Array.isArray(d.tools) ? d.tools.filter((t): t is string => typeof t === 'string') : undefined,
       budgetTokens: typeof d.budgetTokens === 'number' ? d.budgetTokens : undefined,
       maxRuns: typeof d.maxRuns === 'number' ? d.maxRuns : undefined,
+      hasMailbox: d.hasMailbox === true,
     };
   } catch {
     return null;
@@ -125,6 +128,7 @@ export function discoverArms(): ArmMeta[] {
       tools: cfg?.tools ?? null,
       budgetTokens: cfg?.budgetTokens ?? null,
       maxRuns: cfg?.maxRuns ?? null,
+      hasMailbox: cfg?.hasMailbox === true,
       hasLog: logIds.has(id),
       hasConfig: cfg !== null,
     };
